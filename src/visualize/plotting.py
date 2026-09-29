@@ -11,7 +11,13 @@ from typing import Optional, List
 from pathlib import Path
 import numpy as np
 import matplotlib
-matplotlib.use("Agg")  # Non-interactive backend safe for CLI / server
+try:
+    # Do not override backend if inside IPython/Jupyter interactive notebook
+    from IPython import get_ipython
+    if get_ipython() is None:
+        matplotlib.use("Agg")
+except ImportError:
+    matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 

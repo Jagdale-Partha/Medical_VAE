@@ -227,10 +227,111 @@ def create_uad_data_splits(
     val_ds = BrainMRISliceDataset(val_imgs, val_msks, val_lbls)
     test_ds = BrainMRISliceDataset(test_imgs, test_msks, test_lbls)
 
+# Alias for semantic clarity
+MedMNISTUADDataset = BrainMRISliceDataset
+
+
+def load_medmnist_uad_splits(
+    dataset_name: str = "OrganAMNIST",
+    normal_class: int = 0,
+    max_train_samples: int = 500,
+    max_val_samples: int = 100,
+    max_test_samples: int = 250,
+    image_size: int = 128,
+    download: bool = True,
+    seed: int = 42,
+) -> Tuple[Dataset, Dataset, Dataset]:
+    """
+    Constructs strict normative UAD splits directly from official MedMNIST:
+    - Train: Exclusively normal class slices (normal_class, e.g. class 0).
+    - Val: Exclusively normal class slices.
+    - Test: Normal slices + Anomaly slices from out-of-distribution classes.
+    Automatically standardizes and resizes slices to 1 x image_size x image_size in [0.0, 1.0].
+    """
+    import medmnist
+    import torch.nn.functional as F
+
+    DataClass = getattr(medmnist, dataset_name, getattr(medmnist, "OrganAMNIST"))
+    train_raw = DataClass(split="train", download=download)
+    val_raw = DataClass(split="val", download=download)
+    test_raw = DataClass(split="test", download=download)
+
+    rng = np.random.default_rng(seed)
+
+    def extract_and_resize(imgs_np: np.ndarray, indices: np.ndarray) -> np.ndarray:
+        sel = imgs_np[indices]
+        if sel.ndim == 3:
+            # (N, H, W) -> (N, 1, H, W)
+            sel_t = torch.from_numpy(sel).unsqueeze(1).float() / 255.0
+        elif sel.ndim == 4:
+            # (N, H, W, C) -> (N, C, H, W)
+            sel_t = torch.from_numpy(sel).permute(0, 3, 1, 2).float() / 255.0
+            if sel_t.size(1) > 1:
+                sel_t = sel_t.mean(dim=1, keepdim=True)
+        else:
+            raise ValueError(f"Unsupported image shape: {sel.shape}")
+
+        if sel_t.shape[-1] != image_size or sel_t.shape[-2] != image_size:
+            sel_t = F.interpolate(sel_t, size=(image_size, image_size), mode="bilinear", align_corners=False)
+
+        return sel_t.numpy()
+
+    # Normal class masks
+    train_norm_idx = np.where(train_raw.labels.flatten() == normal_class)[0]
+    val_norm_idx = np.where(val_raw.labels.flatten() == normal_class)[0]
+    test_norm_idx = np.where(test_raw.labels.flatten() == normal_class)[0]
+    test_anom_idx = np.where(test_raw.labels.flatten() != normal_class)[0]
+
+    # Subsample to requested quotas
+    rng.shuffle(train_norm_idx)
+    rng.shuffle(val_norm_idx)
+    rng.shuffle(test_norm_idx)
+    rng.shuffle(test_anom_idx)
+
+    train_sel = train_norm_idx[:max_train_samples]
+    val_sel = val_norm_idx[:max_val_samples]
+
+    n_test_norm = min(len(test_norm_idx), max_test_samples // 2)
+    n_test_anom = min(len(test_anom_idx), max_test_samples - n_test_norm)
+    test_norm_sel = test_norm_idx[:n_test_norm]
+    test_anom_sel = test_anom_idx[:n_test_anom]
+
+    # Extract resized arrays
+    train_imgs = extract_and_resize(train_raw.imgs, train_sel)
+    train_masks = np.zeros_like(train_imgs)
+    train_labels = np.zeros(len(train_imgs), dtype=np.int64)
+
+    val_imgs = extract_and_resize(val_raw.imgs, val_sel)
+    val_masks = np.zeros_like(val_imgs)
+    val_labels = np.zeros(len(val_imgs), dtype=np.int64)
+
+    test_norm_imgs = extract_and_resize(test_raw.imgs, test_norm_sel)
+    test_norm_masks = np.zeros_like(test_norm_imgs)
+    test_norm_labels = np.zeros(len(test_norm_imgs), dtype=np.int64)
+
+    test_anom_imgs = extract_and_resize(test_raw.imgs, test_anom_sel)
+    # Binary mask: non-zero pixels in anomaly slices treated as anomalous organ region
+    test_anom_masks = (test_anom_imgs > 0.15).astype(np.float32)
+    test_anom_labels = np.ones(len(test_anom_imgs), dtype=np.int64)
+
+    test_imgs = np.concatenate([test_norm_imgs, test_anom_imgs], axis=0)
+    test_masks = np.concatenate([test_norm_masks, test_anom_masks], axis=0)
+    test_labels = np.concatenate([test_norm_labels, test_anom_labels], axis=0)
+
+    # Shuffle test set
+    p = rng.permutation(len(test_imgs))
+    test_imgs, test_masks, test_labels = test_imgs[p], test_masks[p], test_labels[p]
+
+    train_ds = BrainMRISliceDataset(train_imgs, train_masks, train_labels)
+    val_ds = BrainMRISliceDataset(val_imgs, val_masks, val_labels)
+    test_ds = BrainMRISliceDataset(test_imgs, test_masks, test_labels)
+
     return train_ds, val_ds, test_ds
 
 
 def get_uad_dataloaders(
+    dataset_source: str = "medmnist",
+    dataset_name: str = "OrganAMNIST",
     batch_size: int = 16,
     image_size: int = 128,
     num_workers: int = 0,
@@ -238,15 +339,20 @@ def get_uad_dataloaders(
 ) -> Tuple[DataLoader, DataLoader, DataLoader]:
     """
     Factory function returning (train_loader, val_loader, test_loader).
+    Supports dataset_source="medmnist" (official MedMNIST) and dataset_source="phantom" (synthetic brain).
     """
-    train_ds, val_ds, test_ds = create_uad_data_splits(
-        num_train_healthy=500,
-        num_val_healthy=100,
-        num_test_healthy=100,
-        num_test_pathological=150,
-        image_size=image_size,
-        seed=seed,
-    )
+    if dataset_source.lower() == "medmnist":
+        try:
+            train_ds, val_ds, test_ds = load_medmnist_uad_splits(
+                dataset_name=dataset_name,
+                image_size=image_size,
+                seed=seed,
+            )
+        except Exception as e:
+            print(f"Warning: MedMNIST loading encountered {e}. Falling back to HighFidelityBrainPhantom.")
+            train_ds, val_ds, test_ds = create_uad_data_splits(image_size=image_size, seed=seed)
+    else:
+        train_ds, val_ds, test_ds = create_uad_data_splits(image_size=image_size, seed=seed)
 
     train_loader = DataLoader(
         train_ds, batch_size=batch_size, shuffle=True, num_workers=num_workers, drop_last=True

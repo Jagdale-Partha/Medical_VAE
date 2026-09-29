@@ -193,3 +193,6 @@ class UADEvaluator:
             "slice_scores": all_slice_scores,
             "slice_labels": all_slice_labels,
         }
+
+    # Alias for method name consistency
+    evaluate = evaluate_dataset

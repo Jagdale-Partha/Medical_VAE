@@ -24,6 +24,7 @@ def parse_args():
     parser.add_argument("--lr", type=float, default=default_cfg.train.learning_rate, help="Learning rate")
     parser.add_argument("--beta_kl", type=float, default=default_cfg.loss.beta_kl, help="KL loss weight beta")
     parser.add_argument("--device", type=str, default=default_cfg.train.device, help="Compute device (cuda/cpu)")
+    parser.add_argument("--dataset", type=str, default="medmnist", choices=["medmnist", "phantom"], help="Dataset source (medmnist or phantom)")
     parser.add_argument("--output_dir", type=str, default=str(default_cfg.paths.checkpoints_dir), help="Checkpoint directory")
     return parser.parse_args()
 
@@ -41,12 +42,13 @@ def main():
     cfg.paths.checkpoints_dir.mkdir(parents=True, exist_ok=True)
 
     print(f"=== Starting ceVAE+ Training ===")
-    print(f"Device: {cfg.train.device} | Epochs: {cfg.train.epochs} | Batch Size: {cfg.train.batch_size}")
+    print(f"Device: {cfg.train.device} | Epochs: {cfg.train.epochs} | Batch Size: {cfg.train.batch_size} | Dataset: {args.dataset}")
     print(f"Loss formulation: 0.8 * L1 + 0.2 * (1 - SSIM) + beta ({cfg.loss.beta_kl}) * KL")
 
     # Data loaders
-    print("\n[1/4] Preparing normative healthy dataset splits...")
+    print(f"\n[1/4] Preparing normative healthy dataset splits ({args.dataset})...")
     train_loader, val_loader, _ = get_uad_dataloaders(
+        dataset_source=args.dataset,
         batch_size=cfg.train.batch_size,
         image_size=cfg.model.image_size,
         num_workers=cfg.train.num_workers,

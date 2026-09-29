@@ -136,3 +136,10 @@ class DiagnosticAnomalyScorer:
             "anomaly_map": anomaly_map.detach(),
             "slice_score": slice_score.detach(),
         }
+
+    # Alias for method name consistency
+    score_batch = score_slice
+
+
+# Alias for semantic naming
+AnomalyScorer = DiagnosticAnomalyScorer
