@@ -1,21 +1,27 @@
 /**
- * ceVAE+ Brain MRI Anomaly Detection Visualizer
- * Frontend Application Controller
+ * ceVAE+ Medical AI Clinical Console - Frontend Controller
+ * Provides real-time universal image ingestion, 4-stage sequential visualization,
+ * subtraction colormap switching, and clinical "What This Means" reasoning.
  */
 
 document.addEventListener('DOMContentLoaded', () => {
   // Global State
   let currentCase = null;
-  let activeViewMode = '5panel';
   let activePresetId = 'gbm_parietal';
   let lastUploadedFile = null;
+  let subtractionMode = 'inferno'; // 'inferno' | 'gray'
 
-  // DOM Elements
+  // DOM Elements - Telemetry & Ingestion
   const elDevice = document.getElementById('deviceVal');
   const elPresetsRow = document.getElementById('presetsRow');
   const elDropzone = document.getElementById('dropzone');
   const elFileInput = document.getElementById('fileInput');
+  const elProcBanner = document.getElementById('fileProcessingBanner');
+  const elProcFileName = document.getElementById('procFileName');
+  const elProcFileDetails = document.getElementById('procFileDetails');
+  const elProcStatusPill = document.getElementById('procStatusPill');
 
+  // Controls
   const elThresholdSlider = document.getElementById('thresholdSlider');
   const elThreshVal = document.getElementById('threshVal');
   const elSigmaSelect = document.getElementById('sigmaSelect');
@@ -23,41 +29,57 @@ document.addEventListener('DOMContentLoaded', () => {
   const elBtnRandomNormal = document.getElementById('btnRandomNormal');
   const elBtnRandomPatho = document.getElementById('btnRandomPatho');
 
-  // Verdict Elements
+  // Verdict & "What This Means" Elements
   const elVerdictBanner = document.getElementById('verdictBanner');
   const elVerdictTitle = document.getElementById('verdictTitle');
+  const elVerdictDot = document.getElementById('verdictDot');
   const elConfidenceVal = document.getElementById('confidenceVal');
   const elBurdenVal = document.getElementById('burdenVal');
+  const elPeakAnomalyVal = document.getElementById('peakAnomalyVal');
 
-  // Metrics Elements
-  const elMetric95th = document.getElementById('metric95th');
-  const elMetricMax = document.getElementById('metricMax');
-  const elMetricKL = document.getElementById('metricKL');
-  const elMetricParenchyma = document.getElementById('metricParenchyma');
+  const elMeaningDiseaseText = document.getElementById('meaningDiseaseText');
+  const elMeaningDiseaseSub = document.getElementById('meaningDiseaseSub');
+  const elMeaningReconText = document.getElementById('meaningReconText');
+  const elMeaningSubtractionText = document.getElementById('meaningSubtractionText');
+  const elMeaningHighlightText = document.getElementById('meaningHighlightText');
 
-  // Image Views
+  // Core 4-Stage Visual Cards
   const elImgInput = document.getElementById('imgInput');
   const elImgRecon = document.getElementById('imgRecon');
-  const elImgResidual = document.getElementById('imgResidual');
-  const elImgKLSaliency = document.getElementById('imgKLSaliency');
-  const elImgOverlay = document.getElementById('imgOverlay');
+  const elImgSubtraction = document.getElementById('imgSubtraction');
+  const elImgHighlighted = document.getElementById('imgHighlighted');
+  const elBtnToggleInferno = document.getElementById('btnToggleInferno');
+  const elBtnToggleGray = document.getElementById('btnToggleGray');
+  const elSubtractionChip = document.getElementById('subtractionChip');
 
-  const elImgInspectBase = document.getElementById('imgInspectBase');
-  const elInspectCentroid = document.getElementById('inspectCentroid');
-  const elInspectBbox = document.getElementById('inspectBbox');
-  const elInspectPixels = document.getElementById('inspectPixels');
-  const elInspectBurden = document.getElementById('inspectBurden');
+  // Deep-Dive Views
+  const elViewTabs = document.querySelectorAll('.view-tab');
+  const elPanelCompareView = document.getElementById('panelCompareView');
+  const elPanelInspectView = document.getElementById('panelInspectView');
+  const elPanelPipeline5View = document.getElementById('panelPipeline5View');
+  const elPanelReasoningView = document.getElementById('panelReasoningView');
 
+  // Comparison Split Wipe
   const elImgCompareInput = document.getElementById('imgCompareInput');
   const elImgCompareRecon = document.getElementById('imgCompareRecon');
   const elCompareContainer = document.getElementById('compareContainer');
   const elCompareAfterLayer = document.getElementById('compareAfterLayer');
   const elCompareHandle = document.getElementById('compareHandle');
 
-  // View Containers
-  const elPanel5View = document.getElementById('panel5View');
-  const elPanelInspectView = document.getElementById('panelInspectView');
-  const elPanelCompareView = document.getElementById('panelCompareView');
+  // Inspector
+  const elImgInspectBase = document.getElementById('imgInspectBase');
+  const elInspectCentroid = document.getElementById('inspectCentroid');
+  const elInspectBbox = document.getElementById('inspectBbox');
+  const elInspectPixels = document.getElementById('inspectPixels');
+  const elInspectBurden = document.getElementById('inspectBurden');
+
+  // Pipeline 5 Stage Images
+  const elImg5Input = document.getElementById('img5Input');
+  const elImg5Recon = document.getElementById('img5Recon');
+  const elImg5Residual = document.getElementById('img5Residual');
+  const elImg5KLSaliency = document.getElementById('img5KLSaliency');
+  const elImg5Overlay = document.getElementById('img5Overlay');
+
   const elReasoningList = document.getElementById('reasoningList');
 
   // ==========================================
@@ -67,7 +89,7 @@ document.addEventListener('DOMContentLoaded', () => {
     try {
       const res = await fetch('/api/status');
       const data = await res.json();
-      elDevice.textContent = `${data.device.toUpperCase()} (${(data.total_parameters / 1e6).toFixed(2)}M Params)`;
+      elDevice.textContent = `${data.device.toUpperCase()} (${(data.total_parameters / 1e6).toFixed(2)}M PARAMS)`;
     } catch (e) {
       console.warn('Status fetch error:', e);
       elDevice.textContent = 'CPU (ONLINE)';
@@ -84,7 +106,7 @@ document.addEventListener('DOMContentLoaded', () => {
       renderPresets(presets);
     } catch (e) {
       console.error('Failed to load presets:', e);
-      elPresetsRow.innerHTML = '<div class="preset-error">Failed to load presets.</div>';
+      elPresetsRow.innerHTML = '<div class="preset-error">Failed to load clinical presets.</div>';
     }
   }
 
@@ -96,7 +118,7 @@ document.addEventListener('DOMContentLoaded', () => {
       card.dataset.id = p.id;
 
       const tagClass = p.pathological ? 'tag-patho' : 'tag-normal';
-      const tagText = p.pathological ? 'PATHOLOGICAL TUMOR' : 'HEALTHY CONTROL';
+      const tagText = p.pathological ? 'PATHOLOGY' : 'HEALTHY';
 
       card.innerHTML = `
         <img src="${p.thumbnail}" alt="${p.title}" class="preset-thumb">
@@ -122,7 +144,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // 3. Core Diagnosis Execution
   // ==========================================
   async function runDiagnosis(options = {}) {
-    elVerdictTitle.textContent = 'ANALYZING NEUROANATOMY...';
+    elVerdictTitle.textContent = 'ANALYZING TISSUE & RECONSTRUCTING...';
     elVerdictBanner.style.opacity = '0.6';
 
     const formData = new FormData();
@@ -168,60 +190,108 @@ document.addEventListener('DOMContentLoaded', () => {
   // 4. Render Diagnosis Results & Visuals
   // ==========================================
   function renderDiagnosis(data) {
-    // 1. Verdict Banner
-    elVerdictTitle.textContent = data.verdict;
-    elConfidenceVal.textContent = `${data.confidence}%`;
-    elBurdenVal.textContent = `${data.lesion_area_pct}%`;
+    const isDiseased = data.is_pathological;
+    const meaning = data.diagnostic_meaning || {};
+    const vis = data.visualizations;
 
-    if (data.verdict_color === 'danger') {
-      elVerdictBanner.className = 'verdict-banner';
-    } else {
-      elVerdictBanner.className = 'verdict-banner verdict-success';
+    // 1. File Ingestion Telemetry Banner
+    if (data.file_telemetry) {
+      const ft = data.file_telemetry;
+      elProcFileName.textContent = ft.filename;
+      const padInfo = ft.letterbox_padding && ft.letterbox_padding !== "None" ? ` • Letterbox Padding: ${ft.letterbox_padding}` : "";
+      const aspectInfo = ft.aspect_ratio ? ` • Aspect: ${ft.aspect_ratio}` : "";
+      elProcFileDetails.textContent = `Original: ${ft.original_dimensions} (${ft.original_mode})${aspectInfo}${padInfo} ➔ Converted: ${ft.processed_format}`;
+      elProcStatusPill.textContent = ft.status || "MODEL COMPLIANT (1×128×128)";
+      elProcStatusPill.className = "proc-status-pill";
     }
 
-    // 2. Quantitative Biomarkers
-    elMetric95th.textContent = data.anomaly_score_95th.toFixed(4);
-    elMetricMax.textContent = data.max_anomaly_intensity.toFixed(4);
-    elMetricKL.textContent = data.kl_divergence.toFixed(2);
-    elMetricParenchyma.textContent = `${data.parenchyma_pixels.toLocaleString()} px`;
+    // 2. Main Verdict Banner
+    elVerdictTitle.textContent = meaning.headline || data.verdict;
+    elConfidenceVal.textContent = `${data.confidence}%`;
+    elBurdenVal.textContent = `${data.lesion_area_pct}%`;
+    elPeakAnomalyVal.textContent = data.max_anomaly_intensity.toFixed(3);
 
-    // 3. Stage Visualizations
-    const vis = data.visualizations;
+    if (isDiseased) {
+      elVerdictBanner.className = 'verdict-banner verdict-danger';
+      elVerdictDot.className = 'status-indicator-circle dot-danger';
+    } else {
+      elVerdictBanner.className = 'verdict-banner verdict-success';
+      elVerdictDot.className = 'status-indicator-circle dot-success';
+    }
+
+    // 3. "What This Means" Explainer Cards
+    elMeaningDiseaseText.textContent = meaning.summary || "Evaluation completed.";
+    elMeaningDiseaseSub.innerHTML = `<strong>Status:</strong> ${meaning.badge || (isDiseased ? "DISEASED" : "HEALTHY")} &bull; <strong>Cutoff:</strong> &tau; = ${data.threshold} &bull; <strong>Action:</strong> ${meaning.clinical_action || "See report."}`;
+    
+    elMeaningReconText.textContent = meaning.reconstruction_meaning || "Reconstructing normative healthy baseline.";
+    elMeaningSubtractionText.textContent = meaning.subtraction_meaning || "Subtracting reconstruction from input reveals residual discrepancy.";
+    elMeaningHighlightText.textContent = meaning.highlight_meaning || "Dual-scoring with autograd KL gradient isolates genuine focal pathology.";
+
+    // 4. Update Core 4-Stage Visual Cards
     elImgInput.src = vis.input_slice;
     elImgRecon.src = vis.reconstruction;
-    elImgResidual.src = vis.residual;
-    elImgKLSaliency.src = vis.kl_saliency;
-    elImgOverlay.src = vis.segmentation_overlay;
+    updateSubtractionImage(vis);
+    elImgHighlighted.src = vis.highlighted_differences || vis.segmentation_overlay;
 
-    // High Res Inspector
-    elImgInspectBase.src = vis.segmentation_overlay;
+    // 5. Update Comparison Split Wipe Slider
+    elImgCompareInput.src = vis.input_slice;
+    elImgCompareRecon.src = vis.reconstruction;
+
+    // 6. Update Inspector
+    elImgInspectBase.src = vis.highlighted_differences || vis.segmentation_overlay;
+    const elCrosshair = document.getElementById('crosshair');
     if (data.centroid) {
       elInspectCentroid.textContent = `(${data.centroid.x}, ${data.centroid.y})`;
+      if (elCrosshair) {
+        elCrosshair.style.display = 'block';
+        elCrosshair.style.left = `${(data.centroid.x / 128) * 100}%`;
+        elCrosshair.style.top = `${(data.centroid.y / 128) * 100}%`;
+      }
     } else {
-      elInspectCentroid.textContent = 'None detected';
+      elInspectCentroid.textContent = 'None detected (Normative)';
+      if (elCrosshair) {
+        elCrosshair.style.display = 'none';
+      }
     }
 
     if (data.bbox) {
-      elInspectBbox.textContent = `${data.bbox.width}x${data.bbox.height} px`;
+      elInspectBbox.textContent = `${data.bbox.width} × ${data.bbox.height} px`;
     } else {
       elInspectBbox.textContent = 'N/A';
     }
     elInspectPixels.textContent = `${data.lesion_pixels} px`;
-    elInspectBurden.textContent = `${data.lesion_area_pct}%`;
+    elInspectBurden.textContent = `${data.lesion_area_pct}% of tissue`;
 
-    // Comparison Split Wipe
-    elImgCompareInput.src = vis.input_slice;
-    elImgCompareRecon.src = vis.reconstruction;
+    // 7. Update Full 5-Stage Scientific Pipeline
+    elImg5Input.src = vis.input_slice;
+    elImg5Recon.src = vis.reconstruction;
+    elImg5Residual.src = vis.residual;
+    elImg5KLSaliency.src = vis.kl_saliency;
+    elImg5Overlay.src = vis.segmentation_overlay;
 
-    // 4. Clinical Reasoning Accordion
+    // 8. Update AI Radiologist Narrative
     renderReasoning(data.reasoning_steps);
   }
 
+  function updateSubtractionImage(vis) {
+    if (!vis) return;
+    if (subtractionMode === 'inferno') {
+      elImgSubtraction.src = vis.subtracted_reconstruction || vis.residual;
+      elSubtractionChip.textContent = "Inferno Heatmap (|x - x̂|)";
+      elSubtractionChip.className = "vcard-chip chip-gold";
+    } else {
+      elImgSubtraction.src = vis.subtracted_reconstruction_gray || vis.residual;
+      elSubtractionChip.textContent = "Raw Grayscale Difference";
+      elSubtractionChip.className = "vcard-chip chip-cyan";
+    }
+  }
+
   function renderReasoning(steps) {
+    if (!steps) return;
     elReasoningList.innerHTML = '';
     steps.forEach((step, idx) => {
       const card = document.createElement('div');
-      card.className = `reason-step-card ${idx === 4 || idx === 5 ? 'open' : ''}`;
+      card.className = `reason-step-card ${idx === 0 || idx === 1 || idx === 2 ? 'open' : ''}`;
 
       card.innerHTML = `
         <button class="reason-header-btn">
@@ -255,7 +325,24 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // ==========================================
-  // 5. Interactive Threshold Slider
+  // 5. Subtraction Colormap Toggle
+  // ==========================================
+  elBtnToggleInferno.addEventListener('click', () => {
+    subtractionMode = 'inferno';
+    elBtnToggleInferno.classList.add('active');
+    elBtnToggleGray.classList.remove('active');
+    if (currentCase) updateSubtractionImage(currentCase.visualizations);
+  });
+
+  elBtnToggleGray.addEventListener('click', () => {
+    subtractionMode = 'gray';
+    elBtnToggleGray.classList.add('active');
+    elBtnToggleInferno.classList.remove('active');
+    if (currentCase) updateSubtractionImage(currentCase.visualizations);
+  });
+
+  // ==========================================
+  // 6. Interactive Threshold & Controls
   // ==========================================
   let sliderTimeout = null;
   elThresholdSlider.addEventListener('input', (e) => {
@@ -288,7 +375,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // Random Generator Buttons
+  // Procedural Generator Buttons
   elBtnRandomNormal.addEventListener('click', () => {
     document.querySelectorAll('.preset-card').forEach(c => c.classList.remove('active'));
     activePresetId = null;
@@ -304,103 +391,84 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // ==========================================
-  // 6. File Upload & Drag-and-Drop
+  // 7. Universal Drag-and-Drop & File Upload
   // ==========================================
   elDropzone.addEventListener('click', () => elFileInput.click());
 
-  elFileInput.addEventListener('change', (e) => {
-    if (e.target.files && e.target.files[0]) {
-      handleFileUpload(e.target.files[0]);
-    }
+  elDropzone.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    elDropzone.classList.add('drag-active');
   });
 
-  ['dragenter', 'dragover'].forEach(name => {
-    elDropzone.addEventListener(name, (e) => {
-      e.preventDefault();
-      elDropzone.classList.add('dragover');
-    });
-  });
-
-  ['dragleave', 'drop'].forEach(name => {
-    elDropzone.addEventListener(name, (e) => {
-      e.preventDefault();
-      elDropzone.classList.remove('dragover');
-    });
+  elDropzone.addEventListener('dragleave', () => {
+    elDropzone.classList.remove('drag-active');
   });
 
   elDropzone.addEventListener('drop', (e) => {
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+    e.preventDefault();
+    elDropzone.classList.remove('drag-active');
+    if (e.dataTransfer.files.length > 0) {
       handleFileUpload(e.dataTransfer.files[0]);
     }
   });
 
+  elFileInput.addEventListener('change', (e) => {
+    if (e.target.files.length > 0) {
+      handleFileUpload(e.target.files[0]);
+    }
+  });
+
   function handleFileUpload(file) {
+    lastUploadedFile = file;
     document.querySelectorAll('.preset-card').forEach(c => c.classList.remove('active'));
     activePresetId = null;
-    lastUploadedFile = file;
-    runDiagnosis({ file });
+
+    elProcFileName.textContent = `Processing Upload: ${file.name}`;
+    elProcFileDetails.textContent = `File size: ${(file.size / 1024).toFixed(1)} KB &bull; Ingesting and converting to 1×128×128 float tensor...`;
+    elProcStatusPill.textContent = "HARMONIZING...";
+
+    runDiagnosis({ file: file });
   }
 
   // ==========================================
-  // 7. View Mode Switching
+  // 8. Tab Navigation
   // ==========================================
-  const viewTabs = document.querySelectorAll('.view-tab');
-  viewTabs.forEach(tab => {
+  elViewTabs.forEach(tab => {
     tab.addEventListener('click', () => {
-      viewTabs.forEach(t => t.classList.remove('active'));
+      elViewTabs.forEach(t => t.classList.remove('active'));
       tab.classList.add('active');
 
-      activeViewMode = tab.dataset.mode;
-      elPanel5View.classList.add('hidden');
-      elPanelInspectView.classList.add('hidden');
-      elPanelCompareView.classList.add('hidden');
-
-      if (activeViewMode === '5panel') {
-        elPanel5View.classList.remove('hidden');
-      } else if (activeViewMode === 'inspect') {
-        elPanelInspectView.classList.remove('hidden');
-      } else if (activeViewMode === 'compare') {
-        elPanelCompareView.classList.remove('hidden');
-      }
+      const mode = tab.dataset.mode;
+      elPanelCompareView.classList.toggle('hidden', mode !== 'compare');
+      elPanelInspectView.classList.toggle('hidden', mode !== 'inspect');
+      elPanelPipeline5View.classList.toggle('hidden', mode !== 'pipeline5');
+      elPanelReasoningView.classList.toggle('hidden', mode !== 'reasoning');
     });
   });
 
-  // Layer Toggles in Inspector
-  const chkShowMask = document.getElementById('chkShowMask');
-  if (chkShowMask) {
-    chkShowMask.addEventListener('change', (e) => {
-      if (currentCase) {
-        elImgInspectBase.src = e.target.checked
-          ? currentCase.visualizations.segmentation_overlay
-          : currentCase.visualizations.input_slice;
-      }
-    });
-  }
-
   // ==========================================
-  // 8. Split Wipe Comparison Slider
+  // 9. Split Wipe Slider Interaction
   // ==========================================
   let isDragging = false;
 
-  function updateCompareWipe(clientX) {
+  function updateSplit(clientX) {
     const rect = elCompareContainer.getBoundingClientRect();
     let x = clientX - rect.left;
     x = Math.max(0, Math.min(x, rect.width));
     const pct = (x / rect.width) * 100;
 
-    elCompareHandle.style.left = `${pct}%`;
     elCompareAfterLayer.style.clipPath = `polygon(${pct}% 0, 100% 0, 100% 100%, ${pct}% 100%)`;
+    elCompareHandle.style.left = `${pct}%`;
   }
 
   elCompareContainer.addEventListener('mousedown', (e) => {
     isDragging = true;
-    updateCompareWipe(e.clientX);
+    updateSplit(e.clientX);
   });
 
   window.addEventListener('mousemove', (e) => {
-    if (isDragging) {
-      updateCompareWipe(e.clientX);
-    }
+    if (!isDragging) return;
+    updateSplit(e.clientX);
   });
 
   window.addEventListener('mouseup', () => {
@@ -410,16 +478,28 @@ document.addEventListener('DOMContentLoaded', () => {
   // Touch Support
   elCompareContainer.addEventListener('touchstart', (e) => {
     isDragging = true;
-    if (e.touches && e.touches[0]) updateCompareWipe(e.touches[0].clientX);
-  });
-  window.addEventListener('touchmove', (e) => {
-    if (isDragging && e.touches && e.touches[0]) updateCompareWipe(e.touches[0].clientX);
-  });
-  window.addEventListener('touchend', () => isDragging = false);
+    updateSplit(e.touches[0].clientX);
+  }, { passive: true });
 
-  // Initialize
-  fetchStatus();
-  fetchPresets().then(() => {
-    runDiagnosis({ preset_id: 'gbm_parietal' });
+  window.addEventListener('touchmove', (e) => {
+    if (!isDragging) return;
+    updateSplit(e.touches[0].clientX);
+  }, { passive: true });
+
+  window.addEventListener('touchend', () => {
+    isDragging = false;
   });
+
+  // Set initial split wipe to 50%
+  if (elCompareAfterLayer && elCompareHandle) {
+    elCompareAfterLayer.style.clipPath = 'polygon(50% 0, 100% 0, 100% 100%, 50% 100%)';
+    elCompareHandle.style.left = '50%';
+  }
+
+  // ==========================================
+  // 10. Bootstrap Application
+  // ==========================================
+  fetchStatus();
+  fetchPresets();
+  runDiagnosis({ preset_id: 'gbm_parietal' });
 });

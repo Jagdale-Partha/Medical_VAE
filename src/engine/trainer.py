@@ -65,13 +65,12 @@ class CeVAETrainer:
         for batch in pbar:
             x_clean = batch["image"].to(self.device)
 
-            # Apply dynamic random spatial erasing
-            x_masked, _ = self.eraser(x_clean)
-
-            self.optimizer.zero_grad()
-
-            # Dual forward pass: clean + masked inpainting
-            outputs = self.model(x_clean=x_clean, x_masked=x_masked)
+            # Apply dynamic random spatial erasing if enabled (ceVAE dual pass vs Spatial VAE single pass)
+            if self.eraser is not None and getattr(self.config.masking, "p_apply", 1.0) > 0.0:
+                x_masked, _ = self.eraser(x_clean)
+                outputs = self.model(x_clean=x_clean, x_masked=x_masked)
+            else:
+                outputs = self.model(x_clean=x_clean)
 
             # Composite loss
             loss_dict = self.loss_fn(

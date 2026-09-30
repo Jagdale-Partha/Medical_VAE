@@ -3,28 +3,22 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ceVAE+ | Medical AI Brain MRI Anomaly Detection Console</title>
-  <meta name="description" content="Enhanced Context-Encoding Variational Autoencoder (ceVAE+) for Unsupervised Anomaly Detection in Brain MRI scans. Interactive clinical reasoning and dual-scoring visualization.">
+  <title>ceVAE+ | Medical AI Anomaly Detection Console</title>
+  <meta name="description" content="Enhanced Context-Encoding Variational Autoencoder (ceVAE+) for Unsupervised Anomaly Detection. Real-time reconstruction, subtraction, and anomaly localization with clinical reasoning.">
   
-  <!-- Modern Google Fonts -->
+  <!-- Modern Google Fonts: DM Serif Display, DM Sans, DM Mono (Partha's Portfolio Typography) -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Outfit:wght@500;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:ital,wght@0,300;0,400;0,500;1,400&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=DM+Serif+Display:ital@0;1&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
 
-  <!-- Background Glowing Orb Highlights -->
-  <div class="glow-orb orb-1"></div>
-  <div class="glow-orb orb-2"></div>
-  <div class="glow-orb orb-3"></div>
-
-  <!-- Top Navigation / Telemetry Header -->
+  <!-- Top Navigation & Model Telemetry Header -->
   <header class="app-header">
     <div class="header-left">
       <div class="brand-logo">
-        <span class="logo-pulse"></span>
         <svg class="logo-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <circle cx="12" cy="12" r="9"/>
           <path d="M12 3a9 9 0 0 1 9 9h-9V3z"/>
@@ -32,8 +26,8 @@
         </svg>
       </div>
       <div>
-        <h1 class="brand-title">ceVAE<span class="brand-plus">+</span> <span class="brand-tag">UAD CLINICAL CONSOLE</span></h1>
-        <p class="brand-subtitle">Enhanced Context-Encoding Variational Autoencoder for Brain MRI Anomaly Detection</p>
+        <h1 class="brand-title">ceVAE<em>+</em> <span class="brand-tag">UAD MEDICAL CONSOLE</span></h1>
+        <p class="brand-subtitle">Enhanced Context-Encoding Variational Autoencoder &bull; Unsupervised Anomaly Detection</p>
       </div>
     </div>
 
@@ -45,12 +39,12 @@
         <span class="telemetry-val" id="deviceVal">DETECTING...</span>
       </div>
       <div class="telemetry-pill">
-        <span class="telemetry-label">LATENT DIM:</span>
-        <span class="telemetry-val">128 (16,384 &rarr; 128)</span>
+        <span class="telemetry-label">FORMAT:</span>
+        <span class="telemetry-val highlight-cyan">1&times;128&times;128 Float32</span>
       </div>
       <div class="telemetry-pill">
         <span class="telemetry-label">BOTTLENECK:</span>
-        <span class="telemetry-val highlight-green">ZERO SKIP LEAKAGE</span>
+        <span class="telemetry-val highlight-green">128D (ZERO SKIP)</span>
       </div>
     </div>
   </header>
@@ -58,12 +52,13 @@
   <!-- Main Container -->
   <main class="main-container">
 
-    <!-- Top Grid: Case Selection & Upload Drawer -->
+    <!-- Section 1: Universal Image Ingestion & Case Selection -->
     <section class="section-card upload-section">
       <div class="section-header">
         <div>
-          <h2 class="section-title">1. Input Acquisition & Case Selection</h2>
-          <p class="section-desc">Select a validated clinical preset, upload a patient DICOM/PNG/NPY slice, or generate an on-the-fly realistic brain phantom.</p>
+          <div class="section-tag">01 &bull; Ingestion &amp; Harmonization</div>
+          <h2 class="section-title">Input Acquisition &amp; <em>Auto-Harmonization</em></h2>
+          <p class="section-desc">Add <strong>any image file</strong> (PNG, JPG, WEBP, BMP, TIFF, NPY) of any size or channel format. It is automatically harmonized, converted to grayscale, and rescaled to <strong>1&times;128&times;128 normalized float</strong> as required by ceVAE+.</p>
         </div>
         <div class="action-btn-group">
           <button class="btn btn-secondary" id="btnRandomNormal">
@@ -82,9 +77,9 @@
         <div class="preset-loading">Loading clinical presets...</div>
       </div>
 
-      <!-- File Upload Zone -->
+      <!-- Universal File Upload Dropzone -->
       <div class="upload-dropzone" id="dropzone">
-        <input type="file" id="fileInput" accept=".png,.jpg,.jpeg,.npy" hidden>
+        <input type="file" id="fileInput" accept="image/*,.npy,.tiff,.tif" hidden>
         <div class="dropzone-content">
           <div class="upload-icon-wrapper">
             <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2">
@@ -93,19 +88,33 @@
               <line x1="12" y1="3" x2="12" y2="15"/>
             </svg>
           </div>
-          <div>
-            <p class="upload-main-text"><strong>Drag & Drop Patient MRI Slice</strong> or <span class="browse-link">browse files</span></p>
-            <p class="upload-sub-text">Supported formats: PNG, JPG, JPEG, NPY (Auto-standardized to 1&times;128&times;128 in [0.0, 1.0])</p>
+          <div class="dropzone-text-group">
+            <p class="upload-main-text"><strong>Drop ANY Image Here</strong> or <span class="browse-link">browse files to upload</span></p>
+            <p class="upload-sub-text">Accepts all image formats (PNG, JPG, WEBP, BMP, TIFF, NPY, DICOM-converted) &bull; Auto-converted to <strong>1&times;128&times;128 Float32 [0.0, 1.0]</strong></p>
           </div>
+        </div>
+      </div>
+
+      <!-- Live File Processing Telemetry Banner -->
+      <div class="file-processing-banner" id="fileProcessingBanner">
+        <div class="proc-badge-left">
+          <span class="proc-icon">⚡</span>
+          <div>
+            <span class="proc-title" id="procFileName">Auto-Harmonization Active</span>
+            <span class="proc-desc" id="procFileDetails">Uploaded files are converted to single-channel 128x128 float tensors</span>
+          </div>
+        </div>
+        <div class="proc-badge-right">
+          <span class="proc-status-pill" id="procStatusPill">MODEL COMPLIANT (1&times;128&times;128)</span>
         </div>
       </div>
     </section>
 
-    <!-- Interactive Tuning & Controls Bar -->
+    <!-- Interactive Tuning & Diagnostic Sensitivity Bar -->
     <section class="controls-bar">
       <div class="control-item">
         <label for="thresholdSlider">
-          <span>Anomaly Detection Threshold (&tau;):</span>
+          <span>Anomaly Sensitivity Threshold (&tau;):</span>
           <span class="slider-badge" id="threshVal">0.35</span>
         </label>
         <input type="range" id="thresholdSlider" min="0.10" max="0.85" step="0.01" value="0.35">
@@ -117,12 +126,12 @@
           <option value="1.0">1.0 (Sharp / Minimal blur)</option>
           <option value="1.5" selected>1.5 (Optimal clinical standard)</option>
           <option value="2.0">2.0 (High noise suppression)</option>
-          <option value="2.5">2.5 (Diffuse anomalies)</option>
+          <option value="2.5">2.5 (Diffuse lesions)</option>
         </select>
       </div>
 
       <div class="control-item">
-        <label>Dual-Scoring Mechanism:</label>
+        <label>Dual-Scoring Formula:</label>
         <div class="badge-active-formula">
           <code>&Ascr; = Gauss(|x - x̂| &odot; |&nabla;<sub>x</sub>L<sub>KL</sub>|)</code>
         </div>
@@ -136,247 +145,341 @@
       </div>
     </section>
 
-    <!-- Main Results Grid: Visualization & Reasoning Split -->
-    <div class="results-grid">
-
-      <!-- Left Column: Diagnostic Visualizer -->
-      <div class="visualizer-column">
-        
-        <!-- Clinical Verdict Banner -->
-        <div class="verdict-banner" id="verdictBanner">
-          <div class="verdict-left">
-            <span class="status-indicator-circle" id="verdictDot"></span>
-            <div>
-              <span class="verdict-eyebrow">DIAGNOSTIC VERDICT</span>
-              <h3 class="verdict-heading" id="verdictTitle">INITIALIZING SCAN...</h3>
-            </div>
-          </div>
-          <div class="verdict-right">
-            <div class="metric-chip">
-              <span class="chip-label">CONFIDENCE</span>
-              <span class="chip-val" id="confidenceVal">--%</span>
-            </div>
-            <div class="metric-chip">
-              <span class="chip-label">LESION BURDEN</span>
-              <span class="chip-val" id="burdenVal">--%</span>
-            </div>
+    <!-- SECTION 2: Prominent Diagnostic Verdict & Meaning Card -->
+    <section class="section-card verdict-meaning-section" id="verdictMeaningSection">
+      
+      <!-- Primary Status Banner -->
+      <div class="verdict-banner" id="verdictBanner">
+        <div class="verdict-left">
+          <span class="status-indicator-circle" id="verdictDot"></span>
+          <div>
+            <span class="verdict-eyebrow">DIAGNOSTIC STATUS &bull; ceVAE+ NORMATIVE EVALUATION</span>
+            <h3 class="verdict-heading" id="verdictTitle">INITIALIZING SCAN...</h3>
           </div>
         </div>
-
-        <!-- View Mode Tabs -->
-        <div class="view-mode-tabs">
-          <button class="view-tab active" data-mode="5panel">
-            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
-            5-Stage Pipeline View
-          </button>
-          <button class="view-tab" data-mode="inspect">
-            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-            High-Res Inspector & Centroid
-          </button>
-          <button class="view-tab" data-mode="compare">
-            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="2" x2="12" y2="22"/><rect x="2" y="2" width="20" height="20" rx="2"/></svg>
-            Before/After Split Wipe
-          </button>
-        </div>
-
-        <!-- Mode 1: 5-Stage Pipeline Panels -->
-        <div class="panel-view-container" id="panel5View">
-          <div class="cards-5-grid">
-
-            <!-- Card 1: Input -->
-            <div class="stage-card">
-              <div class="stage-card-header">
-                <span class="stage-num">(1)</span>
-                <span class="stage-name">Input Slice (x)</span>
-              </div>
-              <div class="stage-img-wrapper">
-                <img id="imgInput" src="" alt="Input Slice" class="stage-img">
-              </div>
-              <div class="stage-card-footer">Axial T2-FLAIR [0, 1]</div>
-            </div>
-
-            <!-- Card 2: Reconstruction -->
-            <div class="stage-card">
-              <div class="stage-card-header">
-                <span class="stage-num">(2)</span>
-                <span class="stage-name">Normative Recon (x̂)</span>
-              </div>
-              <div class="stage-img-wrapper">
-                <img id="imgRecon" src="" alt="Normative Reconstruction" class="stage-img">
-              </div>
-              <div class="stage-card-footer">Zero-Leakage Manifold</div>
-            </div>
-
-            <!-- Card 3: Residual -->
-            <div class="stage-card">
-              <div class="stage-card-header">
-                <span class="stage-num">(3)</span>
-                <span class="stage-name">Residual |x - x̂|</span>
-              </div>
-              <div class="stage-img-wrapper">
-                <img id="imgResidual" src="" alt="Spatial Residual" class="stage-img">
-              </div>
-              <div class="stage-card-footer">Contains Edge Blur Artifacts</div>
-            </div>
-
-            <!-- Card 4: KL Saliency -->
-            <div class="stage-card">
-              <div class="stage-card-header">
-                <span class="stage-num">(4)</span>
-                <span class="stage-name">KL Saliency |&nabla;<sub>x</sub>L<sub>KL</sub>|</span>
-              </div>
-              <div class="stage-img-wrapper">
-                <img id="imgKLSaliency" src="" alt="KL Saliency" class="stage-img">
-              </div>
-              <div class="stage-card-footer">Prior Deviation Gradient</div>
-            </div>
-
-            <!-- Card 5: Final Overlay -->
-            <div class="stage-card highlighted-stage">
-              <div class="stage-card-header">
-                <span class="stage-num">(5)</span>
-                <span class="stage-name">Diagnostic Overlay</span>
-              </div>
-              <div class="stage-img-wrapper">
-                <img id="imgOverlay" src="" alt="Diagnostic Overlay" class="stage-img">
-              </div>
-              <div class="stage-card-footer highlight-red">Red: Pred | Green: GT</div>
-            </div>
-
+        <div class="verdict-right">
+          <div class="metric-chip">
+            <span class="chip-label">DISEASE PROBABILITY</span>
+            <span class="chip-val" id="confidenceVal">--%</span>
+          </div>
+          <div class="metric-chip">
+            <span class="chip-label">LESION BURDEN</span>
+            <span class="chip-val" id="burdenVal">--%</span>
+          </div>
+          <div class="metric-chip">
+            <span class="chip-label">PEAK ANOMALY</span>
+            <span class="chip-val" id="peakAnomalyVal">--</span>
           </div>
         </div>
-
-        <!-- Mode 2: Interactive High-Res Inspector -->
-        <div class="panel-view-container hidden" id="panelInspectView">
-          <div class="inspect-workspace">
-            <div class="inspect-canvas-box">
-              <img id="imgInspectBase" src="" alt="Base Slice" class="inspect-img">
-              <div class="crosshair-indicator" id="crosshair"></div>
-            </div>
-            <div class="inspect-meta-box">
-              <h4 class="inspect-heading">Pathology Centroid & Spatial Extent</h4>
-              <div class="inspect-metrics-grid">
-                <div class="inspect-cell">
-                  <span class="inspect-cell-label">Centroid (X, Y)</span>
-                  <span class="inspect-cell-val" id="inspectCentroid">N/A</span>
-                </div>
-                <div class="inspect-cell">
-                  <span class="inspect-cell-label">Bounding Box</span>
-                  <span class="inspect-cell-val" id="inspectBbox">N/A</span>
-                </div>
-                <div class="inspect-cell">
-                  <span class="inspect-cell-label">Lesion Pixel Volume</span>
-                  <span class="inspect-cell-val" id="inspectPixels">0 px</span>
-                </div>
-                <div class="inspect-cell">
-                  <span class="inspect-cell-label">Parenchyma Burden</span>
-                  <span class="inspect-cell-val" id="inspectBurden">0.0%</span>
-                </div>
-              </div>
-
-              <div class="layer-toggles">
-                <label class="toggle-option">
-                  <input type="checkbox" id="chkShowMask" checked>
-                  <span>Show Lesion Contour Mask</span>
-                </label>
-                <label class="toggle-option">
-                  <input type="checkbox" id="chkShowCentroid" checked>
-                  <span>Show Centroid Target Target</span>
-                </label>
-              </div>
-
-              <div class="annotation-callout">
-                <p><strong>Clinical Note:</strong> Red highlighted areas represent brain regions where both the structural residual and the autograd latent gradient significantly deviate from the healthy distribution $p_{\text{normative}}(x)$.</p>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Mode 3: Before / After Split Wipe Comparison -->
-        <div class="panel-view-container hidden" id="panelCompareView">
-          <div class="comparison-container" id="compareContainer">
-            <div class="compare-layer compare-before">
-              <img id="imgCompareInput" src="" alt="Input" class="compare-img">
-              <span class="compare-tag tag-before">INPUT SCAN (x)</span>
-            </div>
-            <div class="compare-layer compare-after" id="compareAfterLayer">
-              <img id="imgCompareRecon" src="" alt="Recon" class="compare-img">
-              <span class="compare-tag tag-after">NORMATIVE RECON (x̂)</span>
-            </div>
-            <div class="compare-handle" id="compareHandle">
-              <div class="handle-arrow-left">&#9664;</div>
-              <div class="handle-line"></div>
-              <div class="handle-arrow-right">&#9654;</div>
-            </div>
-          </div>
-          <p class="compare-instruction">Drag the slider horizontally to compare the raw patient MRI against the model's normative reconstruction (healthy brain manifold without tumors).</p>
-        </div>
-
       </div>
 
-      <!-- Right Column: Quantitative Biomarkers & Clinical Reasoning -->
-      <div class="reasoning-column">
+      <!-- What This Means: Plain English Clinical Explainer Cards (Bento 4-Grid) -->
+      <div class="meaning-cards-grid">
         
-        <!-- Quantitative Biomarkers Summary -->
-        <div class="section-card metrics-card">
-          <h3 class="card-title">
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 20V10M12 20V4M6 20v-6"/></svg>
-            Quantitative UAD Biomarkers
-          </h3>
-          <div class="metrics-grid">
-            <div class="metric-box">
-              <span class="m-label">95th Percentile Anomaly</span>
-              <span class="m-val" id="metric95th">--</span>
-              <span class="m-sub">Cutoff: &gt;0.22 Pathological</span>
-            </div>
-            <div class="metric-box">
-              <span class="m-label">Peak Anomaly Intensity</span>
-              <span class="m-val" id="metricMax">--</span>
-              <span class="m-sub">Max Pixel Deviation</span>
-            </div>
-            <div class="metric-box">
-              <span class="m-label">Latent &Delta;KL Divergence</span>
-              <span class="m-val" id="metricKL">--</span>
-              <span class="m-sub">Deviation from Prior N(0, I)</span>
-            </div>
-            <div class="metric-box">
-              <span class="m-label">Intracranial Tissue</span>
-              <span class="m-val" id="metricParenchyma">--</span>
-              <span class="m-sub">Non-Air Pixels</span>
-            </div>
+        <!-- Meaning Card 1: Disease Status -->
+        <div class="meaning-card card-status">
+          <div class="meaning-header">
+            <span class="meaning-icon">🏥</span>
+            <h4 class="meaning-title">1. Is It Diseased or Healthy?</h4>
           </div>
-        </div>
-
-        <!-- Clinical Reasoning Breakdown (The "Why & How") -->
-        <div class="section-card reasoning-card">
-          <div class="reasoning-header">
-            <h3 class="card-title">
-              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
-              AI Radiologist Diagnostic Reasoning
-            </h3>
-            <span class="reasoning-step-count">6 Rigorous Stages</span>
-          </div>
-
-          <p class="reasoning-intro">
-            Unsupervised anomaly detection bridges the gap between normative modeling (Kumar et al. 2023), spatial bottleneck isolation (Baur et al. 2021), and dual-scoring gradient localization (Zimmerer et al. 2019):
+          <p class="meaning-text" id="meaningDiseaseText">
+            Evaluating neuroanatomical structures against the normative healthy manifold...
           </p>
+          <div class="meaning-subtext" id="meaningDiseaseSub">
+            <strong>Clinical Basis:</strong> Anomaly score thresholding &bull; Out-of-distribution tissue burden
+          </div>
+        </div>
 
-          <!-- Accordion of Clinical Reasoning Steps -->
-          <div class="reasoning-steps-list" id="reasoningList">
-            <!-- Dynamically populated via app.js -->
+        <!-- Meaning Card 2: Model Reconstruction -->
+        <div class="meaning-card card-recon">
+          <div class="meaning-header">
+            <span class="meaning-icon">🧠</span>
+            <h4 class="meaning-title">2. What the Reconstruction (x̂) Means</h4>
+          </div>
+          <p class="meaning-text" id="meaningReconText">
+            ceVAE+ was trained strictly on healthy anatomy with zero skip connections. It attempts to 'heal' the scan by reconstructing what healthy parenchyma would look like in this location.
+          </p>
+          <div class="meaning-subtext">
+            <strong>Key Benefit:</strong> Zero pathology leakage (lesions are erased, not copied)
+          </div>
+        </div>
+
+        <!-- Meaning Card 3: Subtraction -->
+        <div class="meaning-card card-subtraction">
+          <div class="meaning-header">
+            <span class="meaning-icon">➖</span>
+            <h4 class="meaning-title">3. What the Subtraction (|x - x̂|) Means</h4>
+          </div>
+          <p class="meaning-text" id="meaningSubtractionText">
+            Subtracting the reconstruction from your input reveals what the healthy model could not explain. Normal structures cancel to near zero (dark), leaving abnormal lesions glowing bright.
+          </p>
+          <div class="meaning-subtext">
+            <strong>Mathematical Basis:</strong> Raw spatial residual |x - x̂|
+          </div>
+        </div>
+
+        <!-- Meaning Card 4: Highlighted Differences -->
+        <div class="meaning-card card-highlight">
+          <div class="meaning-header">
+            <span class="meaning-icon">🎯</span>
+            <h4 class="meaning-title">4. What the Highlighted Differences Mean</h4>
+          </div>
+          <p class="meaning-text" id="meaningHighlightText">
+            Autograd KL divergence gradient (|∇<sub>x</sub>L<sub>KL</sub>|) validates that these differences represent genuine out-of-distribution pathology rather than benign high-contrast skull edge blur.
+          </p>
+          <div class="meaning-subtext">
+            <strong>Dual-Scoring:</strong> Residual &odot; KL Saliency &bull; Gaussian &sigma;=1.5
           </div>
         </div>
 
       </div>
 
-    </div>
+    </section>
+
+    <!-- SECTION 3: The 4-Stage Core Visual Sequence -->
+    <section class="section-card visual-stages-section">
+      <div class="section-header">
+        <div>
+          <div class="section-tag">03 &bull; Sequential Visual Diagnostics</div>
+          <h2 class="section-title">Visual Diagnostic Pipeline: <em>Input &rarr; Reconstruction &rarr; Subtraction &rarr; Highlighted Lesion</em></h2>
+          <p class="section-desc">Observe the step-by-step transformation: the raw image is processed, the model reconstructs healthy anatomy, the subtraction reveals discrepancies, and dual-scoring highlights the true lesion.</p>
+        </div>
+        <div class="subtraction-toggle-group">
+          <span class="sub-toggle-label">Subtraction View:</span>
+          <button class="btn-toggle active" id="btnToggleInferno" title="High-contrast glowing heatmap">Inferno Heatmap</button>
+          <button class="btn-toggle" id="btnToggleGray" title="Raw grayscale difference">Grayscale</button>
+        </div>
+      </div>
+
+      <!-- 4-Card Sequential Grid -->
+      <div class="core-4-grid">
+
+        <!-- Card 1: Input Image -->
+        <div class="visual-card">
+          <div class="vcard-header">
+            <span class="vcard-step">STAGE 1</span>
+            <span class="vcard-title">Input Image (x)</span>
+          </div>
+          <div class="vcard-img-box">
+            <img id="imgInput" src="" alt="Input Image" class="vcard-img">
+            <span class="vcard-chip chip-cyan">1&times;128&times;128 Standardized</span>
+          </div>
+          <div class="vcard-footer">
+            <p class="vcard-desc">Patient scan, standardized &amp; normalized to [0.0, 1.0]</p>
+          </div>
+        </div>
+
+        <!-- Card 2: Model Reconstruction -->
+        <div class="visual-card vcard-accent-green">
+          <div class="vcard-header">
+            <span class="vcard-step highlight-green">STAGE 2</span>
+            <span class="vcard-title">Model Reconstruction (x̂)</span>
+          </div>
+          <div class="vcard-img-box">
+            <img id="imgRecon" src="" alt="Normative Reconstruction" class="vcard-img">
+            <span class="vcard-chip chip-green">Normative Manifold</span>
+          </div>
+          <div class="vcard-footer">
+            <p class="vcard-desc">Healthy manifold projection &bull; Pathology erased</p>
+          </div>
+        </div>
+
+        <!-- Card 3: Subtracted Reconstruction -->
+        <div class="visual-card vcard-accent-gold">
+          <div class="vcard-header">
+            <span class="vcard-step highlight-gold">STAGE 3</span>
+            <span class="vcard-title">Subtracted Difference (|x - x̂|)</span>
+          </div>
+          <div class="vcard-img-box">
+            <img id="imgSubtraction" src="" alt="Subtracted Reconstruction" class="vcard-img">
+            <span class="vcard-chip chip-gold" id="subtractionChip">Subtraction Residual</span>
+          </div>
+          <div class="vcard-footer">
+            <p class="vcard-desc">Input minus Reconstruction &bull; Bright spots = discrepancies</p>
+          </div>
+        </div>
+
+        <!-- Card 4: Highlighted Differences -->
+        <div class="visual-card vcard-accent-red">
+          <div class="vcard-header">
+            <span class="vcard-step highlight-red">STAGE 4</span>
+            <span class="vcard-title">Highlighted Differences</span>
+          </div>
+          <div class="vcard-img-box">
+            <img id="imgHighlighted" src="" alt="Highlighted Differences" class="vcard-img">
+            <span class="vcard-chip chip-red">Red: Detected Lesion</span>
+          </div>
+          <div class="vcard-footer">
+            <p class="vcard-desc">Dual-scoring filtered overlay &bull; Authenticated pathology</p>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- SECTION 4: Interactive Analysis & Deep-Dive Tabs -->
+    <section class="section-card deep-dive-section">
+      <div class="section-header">
+        <div>
+          <div class="section-tag">04 &bull; Clinical Deep-Dive &amp; Localization</div>
+          <h2 class="section-title">Comparative &amp; Quantitative <em>Analysis</em></h2>
+          <p class="section-desc">Interactive tools for spatial localization, side-by-side split wipe wiping, full 5-stage scientific inspection, and radiologist diagnostic narratives.</p>
+        </div>
+      </div>
+      
+      <!-- View Mode Tabs -->
+      <div class="view-mode-tabs">
+        <button class="view-tab active" data-mode="compare">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="2" x2="12" y2="22"/><rect x="2" y="2" width="20" height="20" rx="2"/></svg>
+          Before/After Split Wipe Slider
+        </button>
+        <button class="view-tab" data-mode="inspect">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          High-Res Inspector &amp; Centroid
+        </button>
+        <button class="view-tab" data-mode="pipeline5">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+          Full 5-Stage Scientific Pipeline
+        </button>
+        <button class="view-tab" data-mode="reasoning">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
+          AI Radiologist 6-Stage Narrative
+        </button>
+      </div>
+
+      <!-- Tab 1: Before / After Split Wipe Comparison -->
+      <div class="panel-view-container" id="panelCompareView">
+        <div class="comparison-container" id="compareContainer">
+          <div class="compare-layer compare-before">
+            <img id="imgCompareInput" src="" alt="Input" class="compare-img">
+            <span class="compare-tag tag-before">INPUT SCAN (x)</span>
+          </div>
+          <div class="compare-layer compare-after" id="compareAfterLayer">
+            <img id="imgCompareRecon" src="" alt="Recon" class="compare-img">
+            <span class="compare-tag tag-after">NORMATIVE RECONSTRUCTION (x̂)</span>
+          </div>
+          <div class="compare-handle" id="compareHandle">
+            <div class="handle-arrow-left">&#9664;</div>
+            <div class="handle-line"></div>
+            <div class="handle-arrow-right">&#9654;</div>
+          </div>
+        </div>
+        <p class="compare-instruction">Drag the handle horizontally to slide between the raw patient scan and the model's normative reconstruction (healthy brain manifold without tumors).</p>
+      </div>
+
+      <!-- Tab 2: High-Res Inspector & Centroid Crosshair -->
+      <div class="panel-view-container hidden" id="panelInspectView">
+        <div class="inspect-workspace">
+          <div class="inspect-canvas-box">
+            <img id="imgInspectBase" src="" alt="Base Slice" class="inspect-img">
+            <div class="crosshair-indicator" id="crosshair"></div>
+          </div>
+          <div class="inspect-meta-box">
+            <h4 class="inspect-heading">Pathology Centroid &amp; Spatial Extent</h4>
+            <div class="inspect-metrics-grid">
+              <div class="inspect-cell">
+                <span class="inspect-cell-label">Centroid (X, Y)</span>
+                <span class="inspect-cell-val" id="inspectCentroid">N/A</span>
+              </div>
+              <div class="inspect-cell">
+                <span class="inspect-cell-label">Bounding Box</span>
+                <span class="inspect-cell-val" id="inspectBbox">N/A</span>
+              </div>
+              <div class="inspect-cell">
+                <span class="inspect-cell-label">Lesion Pixel Volume</span>
+                <span class="inspect-cell-val" id="inspectPixels">0 px</span>
+              </div>
+              <div class="inspect-cell">
+                <span class="inspect-cell-label">Parenchyma Burden</span>
+                <span class="inspect-cell-val" id="inspectBurden">0.0%</span>
+              </div>
+            </div>
+
+            <div class="annotation-callout">
+              <p><strong>Clinical Note:</strong> Red highlighted areas represent brain regions where both the structural residual and the autograd latent gradient significantly deviate from the healthy distribution.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tab 3: Full 5-Stage Scientific Pipeline -->
+      <div class="panel-view-container hidden" id="panelPipeline5View">
+        <div class="cards-5-grid">
+          
+          <div class="stage-card">
+            <div class="stage-card-header">
+              <span class="stage-num">(1)</span>
+              <span class="stage-name">Input Slice (x)</span>
+            </div>
+            <div class="stage-img-wrapper">
+              <img id="img5Input" src="" alt="Input" class="stage-img">
+            </div>
+            <div class="stage-card-footer">Axial Slice [0, 1]</div>
+          </div>
+
+          <div class="stage-card">
+            <div class="stage-card-header">
+              <span class="stage-num">(2)</span>
+              <span class="stage-name">Recon (x̂)</span>
+            </div>
+            <div class="stage-img-wrapper">
+              <img id="img5Recon" src="" alt="Recon" class="stage-img">
+            </div>
+            <div class="stage-card-footer">Zero-Skip Bottleneck</div>
+          </div>
+
+          <div class="stage-card">
+            <div class="stage-card-header">
+              <span class="stage-num">(3)</span>
+              <span class="stage-name">Residual |x - x̂|</span>
+            </div>
+            <div class="stage-img-wrapper">
+              <img id="img5Residual" src="" alt="Residual" class="stage-img">
+            </div>
+            <div class="stage-card-footer">Contains Edge Blur</div>
+          </div>
+
+          <div class="stage-card">
+            <div class="stage-card-header">
+              <span class="stage-num">(4)</span>
+              <span class="stage-name">KL Saliency |&nabla;<sub>x</sub>L<sub>KL</sub>|</span>
+            </div>
+            <div class="stage-img-wrapper">
+              <img id="img5KLSaliency" src="" alt="KL Saliency" class="stage-img">
+            </div>
+            <div class="stage-card-footer">Autograd Prior Gradient</div>
+          </div>
+
+          <div class="stage-card highlighted-stage">
+            <div class="stage-card-header">
+              <span class="stage-num">(5)</span>
+              <span class="stage-name">Dual-Scored Overlay</span>
+            </div>
+            <div class="stage-img-wrapper">
+              <img id="img5Overlay" src="" alt="Overlay" class="stage-img">
+            </div>
+            <div class="stage-card-footer highlight-red">Red: Pred Lesion</div>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- Tab 4: AI Radiologist 6-Stage Narrative -->
+      <div class="panel-view-container hidden" id="panelReasoningView">
+        <div class="reasoning-steps-list" id="reasoningList">
+          <!-- Populated dynamically via app.js -->
+        </div>
+      </div>
+
+    </section>
 
   </main>
 
+  <!-- Modern Clinical Console Footer (Sober Editorial Style) -->
   <footer class="app-footer">
     <div class="footer-content">
       <p><strong>ceVAE+ (Enhanced Context-Encoding Variational Autoencoder)</strong> &bull; Deep Learning Medical AI Mini-Project</p>
-      <p class="footer-sub">Theoretical Anchors: Baur et al. (2021) &bull; Zimmerer et al. (2019) &bull; Pinaya et al. (2021) &bull; Kumar et al. (2023)</p>
+      <p class="footer-sub">Theoretical Anchors: Baur et al. (2020) &bull; Zimmerer et al. (2019) &bull; Pinaya et al. (2021) &bull; Kumar et al. (2021)</p>
     </div>
   </footer>
 

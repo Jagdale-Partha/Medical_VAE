@@ -24,7 +24,10 @@ def parse_args():
     parser.add_argument("--lr", type=float, default=default_cfg.train.learning_rate, help="Learning rate")
     parser.add_argument("--beta_kl", type=float, default=default_cfg.loss.beta_kl, help="KL loss weight beta")
     parser.add_argument("--device", type=str, default=default_cfg.train.device, help="Compute device (cuda/cpu)")
-    parser.add_argument("--dataset", type=str, default="medmnist", choices=["medmnist", "phantom"], help="Dataset source (medmnist or phantom)")
+    parser.add_argument("--dataset", type=str, default="dataset_128", choices=["dataset_128", "ixi_t1", "axial_brain_mri", "real_brain_mri", "medmnist", "phantom"], help="Dataset source (dataset_128, ixi_t1, axial_brain_mri, real_brain_mri, medmnist, or phantom)")
+    parser.add_argument("--max_train_samples", type=int, default=None, help="Maximum number of training slices (default: all)")
+    parser.add_argument("--max_val_samples", type=int, default=None, help="Maximum number of validation slices (default: all)")
+    parser.add_argument("--spatial_vae", action="store_true", help="Train pure Spatial VAE (single-pass, 2x faster, razor-sharp edges)")
     parser.add_argument("--output_dir", type=str, default=str(default_cfg.paths.checkpoints_dir), help="Checkpoint directory")
     return parser.parse_args()
 
@@ -38,12 +41,14 @@ def main():
     cfg.train.learning_rate = args.lr
     cfg.loss.beta_kl = args.beta_kl
     cfg.train.device = args.device
+    if args.spatial_vae:
+        cfg.masking.p_apply = 0.0
     cfg.paths.checkpoints_dir = Path(args.output_dir)
     cfg.paths.checkpoints_dir.mkdir(parents=True, exist_ok=True)
 
     print(f"=== Starting ceVAE+ Training ===")
     print(f"Device: {cfg.train.device} | Epochs: {cfg.train.epochs} | Batch Size: {cfg.train.batch_size} | Dataset: {args.dataset}")
-    print(f"Loss formulation: 0.8 * L1 + 0.2 * (1 - SSIM) + beta ({cfg.loss.beta_kl}) * KL")
+    print(f"Loss formulation: {cfg.loss.l1_weight} * L1 + {cfg.loss.ssim_weight} * (1 - SSIM) + {cfg.loss.edge_weight} * Edge + beta ({cfg.loss.beta_kl}) * KL")
 
     # Data loaders
     print(f"\n[1/4] Preparing normative healthy dataset splits ({args.dataset})...")
@@ -51,6 +56,8 @@ def main():
         dataset_source=args.dataset,
         batch_size=cfg.train.batch_size,
         image_size=cfg.model.image_size,
+        max_train_samples=args.max_train_samples,
+        max_val_samples=args.max_val_samples,
         num_workers=cfg.train.num_workers,
         seed=cfg.train.seed,
     )
@@ -71,8 +78,10 @@ def main():
     # Loss engine & Perturbation module
     print("\n[3/4] Initializing loss engine and dynamic spatial eraser...")
     loss_fn = CompositeCeVAELoss(
+        bce_weight=getattr(cfg.loss, "bce_weight", 1.0),
         l1_weight=cfg.loss.l1_weight,
         ssim_weight=cfg.loss.ssim_weight,
+        edge_weight=cfg.loss.edge_weight,
         beta_kl=cfg.loss.beta_kl,
         clean_weight=cfg.loss.clean_loss_weight,
         inpaint_weight=cfg.loss.inpaint_loss_weight,

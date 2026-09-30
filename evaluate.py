@@ -21,6 +21,7 @@ def parse_args():
     parser.add_argument("--checkpoint", type=str, default="", help="Path to trained model checkpoint (.pt)")
     parser.add_argument("--device", type=str, default=default_cfg.train.device, help="Compute device (cuda/cpu)")
     parser.add_argument("--num_visualizations", type=int, default=5, help="Number of 5-panel figures to save")
+    parser.add_argument("--max_batches", type=int, default=None, help="Max test batches to evaluate (default: all)")
     parser.add_argument("--output_dir", type=str, default=str(default_cfg.paths.results_dir), help="Results output directory")
     return parser.parse_args()
 
@@ -73,7 +74,7 @@ def main():
     )
     evaluator = UADEvaluator(scorer=scorer, device=cfg.train.device)
 
-    results = evaluator.evaluate_dataset(test_loader)
+    results = evaluator.evaluate_dataset(test_loader, max_batches=args.max_batches)
 
     print("\n=== Quantitative Benchmark Results ===")
     print(f"  Pixel-Level Metrics:")

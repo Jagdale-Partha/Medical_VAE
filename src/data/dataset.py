@@ -9,8 +9,10 @@ brain MRI phantom generator for instant zero-dependency execution.
 """
 
 from typing import Tuple, Optional, Dict, List
+from pathlib import Path
 import math
 import numpy as np
+from PIL import Image
 import torch
 from torch.utils.data import Dataset, DataLoader
 
@@ -329,19 +331,425 @@ def load_medmnist_uad_splits(
     return train_ds, val_ds, test_ds
 
 
+def load_real_brain_mri_uad_splits(
+    data_dir: Optional[str] = None,
+    image_size: int = 128,
+    axial_only: bool = True,
+    max_patho_samples: Optional[int] = 30,
+    seed: int = 42,
+) -> Tuple[Dataset, Dataset, Dataset]:
+    """
+    Constructs strict normative UAD splits from real clinical Brain MRI scans:
+    - Train: 70% of healthy ('no/') patient brain MRI scans, strictly normative.
+    - Val: 15% of healthy ('no/') patient scans for validation and early stopping.
+    - Test: Curated pathological ('yes/') patient scans with tumors + remaining healthy controls.
+    
+    Args:
+        data_dir: Optional custom path to brain_tumor_dataset.
+        image_size: Target square resolution (default: 128).
+        axial_only: When True, filters out extreme non-axial cuts (keeps 0.78 <= W/H <= 1.28)
+                    so the model trains on a homogeneous anatomical plane.
+        max_patho_samples: If set (default: 30), limits the pathological test cohort to avoid
+                           massive class imbalance against healthy test controls.
+        seed: Random seed for reproducible dataset partitioning.
+    """
+    from pathlib import Path
+    from PIL import Image
+
+    if data_dir is None:
+        p_root = Path(__file__).resolve().parent.parent.parent
+        dir_path = p_root / "data" / "brain_tumor_dataset"
+    else:
+        dir_path = Path(data_dir)
+
+    no_dir = dir_path / "no"
+    yes_dir = dir_path / "yes"
+
+    if not no_dir.is_dir() or not yes_dir.is_dir():
+        raise FileNotFoundError(f"Brain MRI dataset directory not found at {dir_path}. Run download_real_dataset.py first.")
+
+    def load_and_letterbox_folder(folder: Path, filter_axial: bool = True) -> List[np.ndarray]:
+        imgs = []
+        extensions = ("*.jpg", "*.jpeg", "*.png", "*.JPG", "*.JPEG", "*.PNG")
+        files = []
+        for ext in extensions:
+            files.extend(list(folder.glob(ext)))
+        files.sort()
+
+        for f in files:
+            try:
+                with Image.open(f) as im:
+                    w, h = im.size
+                    if filter_axial:
+                        aspect = w / h
+                        # Filter out extreme non-axial aspect ratio slices
+                        if aspect < 0.78 or aspect > 1.28:
+                            continue
+
+                    im_gray = im.convert("L")
+                    scale = image_size / max(w, h)
+                    nw = max(1, int(round(w * scale)))
+                    nh = max(1, int(round(h * scale)))
+                    im_res = im_gray.resize((nw, nh), Image.Resampling.BILINEAR)
+
+                    canvas = Image.new("L", (image_size, image_size), 0)
+                    canvas.paste(im_res, ((image_size - nw) // 2, (image_size - nh) // 2))
+
+                    arr = np.array(canvas, dtype=np.float32) / 255.0
+                    imgs.append(arr)
+            except Exception as err:
+                print(f"Skipping corrupt image {f}: {err}")
+        return imgs
+
+    healthy_list = load_and_letterbox_folder(no_dir, filter_axial=axial_only)
+    patho_list = load_and_letterbox_folder(yes_dir, filter_axial=axial_only)
+
+    rng = np.random.default_rng(seed)
+    rng.shuffle(healthy_list)
+    rng.shuffle(patho_list)
+
+    if max_patho_samples is not None and len(patho_list) > max_patho_samples:
+        patho_list = patho_list[:max_patho_samples]
+
+    n_healthy = len(healthy_list)
+    n_train = int(n_healthy * 0.70)
+    n_val = int(n_healthy * 0.15)
+
+    train_healthy = np.stack(healthy_list[:n_train], axis=0)[:, np.newaxis, :, :]
+    val_healthy = np.stack(healthy_list[n_train:n_train + n_val], axis=0)[:, np.newaxis, :, :]
+    test_healthy = np.stack(healthy_list[n_train + n_val:], axis=0)[:, np.newaxis, :, :]
+    test_patho = np.stack(patho_list, axis=0)[:, np.newaxis, :, :]
+
+    train_ds = BrainMRISliceDataset(
+        images=train_healthy,
+        masks=np.zeros_like(train_healthy),
+        labels=np.zeros(len(train_healthy), dtype=np.int64),
+    )
+    val_ds = BrainMRISliceDataset(
+        images=val_healthy,
+        masks=np.zeros_like(val_healthy),
+        labels=np.zeros(len(val_healthy), dtype=np.int64),
+    )
+
+    test_imgs = np.concatenate([test_healthy, test_patho], axis=0)
+    test_lbls = np.concatenate([np.zeros(len(test_healthy), dtype=np.int64), np.ones(len(test_patho), dtype=np.int64)], axis=0)
+    test_msks = (test_imgs > 0.35).astype(np.float32) * test_lbls[:, np.newaxis, np.newaxis, np.newaxis]
+
+    perm = rng.permutation(len(test_imgs))
+    test_ds = BrainMRISliceDataset(
+        images=test_imgs[perm],
+        masks=test_msks[perm],
+        labels=test_lbls[perm],
+    )
+
+    return train_ds, val_ds, test_ds
+
+
+def load_axial_brain_mri_uad_splits(
+    data_dir: Optional[str] = None,
+    image_size: int = 128,
+    max_patho_test: int = 30,
+    seed: int = 42,
+) -> Tuple[Dataset, Dataset, Dataset]:
+    """
+    Dedicated single-plane loader: Filters exclusively for Axial cranial MRI slices.
+    Curates a clean, balanced pathological evaluation cohort.
+    """
+    return load_real_brain_mri_uad_splits(
+        data_dir=data_dir,
+        image_size=image_size,
+        axial_only=True,
+        max_patho_samples=max_patho_test,
+        seed=seed,
+    )
+
+
+def load_ixi_t1_uad_splits(
+    data_dir: Optional[str] = None,
+    image_size: int = 128,
+    max_train: int = 5000,
+    max_val: int = 800,
+    max_test_healthy: int = 200,
+    max_patho_test: int = 30,
+    seed: int = 42,
+) -> Tuple[Dataset, Dataset, Dataset]:
+    """
+    Dedicated IXI T1 Cranial MRI loader for ceVAE+ Unsupervised Anomaly Detection.
+    - Train: Normative healthy adult T1-weighted axial brain slices from IXI dataset (y=0).
+    - Val: Separate normative healthy adult T1-weighted axial brain slices from IXI dataset (y=0).
+    - Test: Curated mixture of healthy IXI T1 slices (y=0) and clinical pathological tumor slices (y=1).
+    """
+    root_path = Path(data_dir) if data_dir else Path("data/IXI-T1")
+    rng = np.random.default_rng(seed)
+
+    # 1. Load Train
+    train_npy = root_path / "train_slices.npy"
+    if train_npy.is_file():
+        train_raw = np.load(train_npy)
+        if len(train_raw) > max_train:
+            train_raw = train_raw[:max_train]
+        train_imgs = train_raw.astype(np.float32)[:, np.newaxis, :, :] / 255.0
+    else:
+        train_files = sorted(list((root_path / "train").glob("*.png")))[:max_train]
+        if not train_files:
+            raise FileNotFoundError(f"No IXI T1 train images found in {root_path}")
+        imgs = [np.array(Image.open(f).convert("L"), dtype=np.float32) / 255.0 for f in train_files]
+        train_imgs = np.stack(imgs, axis=0)[:, np.newaxis, :, :]
+
+    # 2. Load Val
+    val_npy = root_path / "val_slices.npy"
+    if val_npy.is_file():
+        val_raw = np.load(val_npy)
+        if len(val_raw) > max_val:
+            val_raw = val_raw[:max_val]
+        val_imgs = val_raw.astype(np.float32)[:, np.newaxis, :, :] / 255.0
+    else:
+        val_files = sorted(list((root_path / "val").glob("*.png")))[:max_val]
+        imgs = [np.array(Image.open(f).convert("L"), dtype=np.float32) / 255.0 for f in val_files]
+        val_imgs = np.stack(imgs, axis=0)[:, np.newaxis, :, :]
+
+    # 3. Load Test Healthy
+    test_h_npy = root_path / "test_healthy_slices.npy"
+    if test_h_npy.is_file():
+        test_h_raw = np.load(test_h_npy)
+        if len(test_h_raw) > max_test_healthy:
+            test_h_raw = test_h_raw[:max_test_healthy]
+        test_h_imgs = test_h_raw.astype(np.float32)[:, np.newaxis, :, :] / 255.0
+    else:
+        test_h_files = sorted(list((root_path / "test_healthy").glob("*.png")))[:max_test_healthy]
+        imgs = [np.array(Image.open(f).convert("L"), dtype=np.float32) / 255.0 for f in test_h_files]
+        test_h_imgs = np.stack(imgs, axis=0)[:, np.newaxis, :, :]
+
+    # 4. Load Pathological Cohort
+    patho_candidates = [
+        Path("data/brain_tumor_dataset/yes"),
+        Path("data/yes"),
+    ]
+    patho_files = []
+    for cand in patho_candidates:
+        if cand.is_dir():
+            for ext in ("*.jpg", "*.jpeg", "*.png"):
+                patho_files.extend(list(cand.glob(ext)))
+            if patho_files:
+                break
+
+    patho_imgs_list = []
+    for f in patho_files:
+        try:
+            with Image.open(f) as im:
+                w, h = im.size
+                aspect = w / h
+                if 0.78 <= aspect <= 1.28:
+                    im_gray = im.convert("L")
+                    scale = image_size / max(w, h)
+                    nw = max(1, int(round(w * scale)))
+                    nh = max(1, int(round(h * scale)))
+                    im_res = im_gray.resize((nw, nh), Image.Resampling.BILINEAR)
+                    canvas = Image.new("L", (image_size, image_size), 0)
+                    canvas.paste(im_res, ((image_size - nw) // 2, (image_size - nh) // 2))
+                    patho_imgs_list.append(np.array(canvas, dtype=np.float32) / 255.0)
+        except Exception:
+            continue
+
+    rng.shuffle(patho_imgs_list)
+    if max_patho_test and len(patho_imgs_list) > max_patho_test:
+        patho_imgs_list = patho_imgs_list[:max_patho_test]
+
+    if patho_imgs_list:
+        test_p_imgs = np.stack(patho_imgs_list, axis=0)[:, np.newaxis, :, :]
+    else:
+        p_imgs = []
+        for s in range(max_patho_test):
+            arr, _ = HighFidelityBrainPhantom.generate_slice(image_size, is_pathological=True, seed=8000 + s)
+            p_imgs.append(arr)
+        test_p_imgs = np.stack(p_imgs, axis=0)[:, np.newaxis, :, :]
+
+    train_ds = BrainMRISliceDataset(
+        images=train_imgs,
+        masks=np.zeros_like(train_imgs),
+        labels=np.zeros(len(train_imgs), dtype=np.int64),
+    )
+    val_ds = BrainMRISliceDataset(
+        images=val_imgs,
+        masks=np.zeros_like(val_imgs),
+        labels=np.zeros(len(val_imgs), dtype=np.int64),
+    )
+
+    test_imgs = np.concatenate([test_h_imgs, test_p_imgs], axis=0)
+    test_lbls = np.concatenate(
+        [np.zeros(len(test_h_imgs), dtype=np.int64), np.ones(len(test_p_imgs), dtype=np.int64)],
+        axis=0,
+    )
+    test_msks = (test_imgs > 0.35).astype(np.float32) * test_lbls[:, np.newaxis, np.newaxis, np.newaxis]
+
+    perm = rng.permutation(len(test_imgs))
+    test_ds = BrainMRISliceDataset(
+        images=test_imgs[perm],
+        masks=test_msks[perm],
+        labels=test_lbls[perm],
+    )
+
+    return train_ds, val_ds, test_ds
+
+
+def load_dataset_128_uad_splits(
+    data_dir: Optional[str] = None,
+    max_train: Optional[int] = None,
+    max_val: Optional[int] = None,
+    max_test_healthy: Optional[int] = None,
+    max_patho_test: Optional[int] = None,
+    seed: int = 42,
+) -> Tuple[Dataset, Dataset, Dataset]:
+    """
+    Standardized 128x128 Brain MRI Dataset Loader.
+    Loads pre-extracted 128x128 slices directly from data/dataset_128/:
+      - train_128.npy: 4,000 normative IXI T1 slices (128x128)
+      - val_128.npy: 600 normative IXI T1 slices (128x128)
+      - test_healthy_128.npy: 400 normative IXI T1 slices (128x128)
+      - test_patho_128.npy: 60 clinical tumor slices (128x128, letterboxed)
+    Provides instant, zero-overhead memory loading with strict normative partitioning.
+    """
+    if data_dir is None:
+        p_root = Path(__file__).resolve().parent.parent.parent
+        root_path = p_root / "data" / "dataset_128"
+    else:
+        root_path = Path(data_dir)
+
+    train_path = root_path / "train_128.npy"
+    val_path = root_path / "val_128.npy"
+    test_h_path = root_path / "test_healthy_128.npy"
+    test_p_path = root_path / "test_patho_128.npy"
+
+    if not train_path.is_file():
+        raise FileNotFoundError(
+            f"Standardized dataset_128 not found at {root_path}. Run prepare_dataset_128.py first."
+        )
+
+    rng = np.random.default_rng(seed)
+
+    # 1. Train healthy
+    train_raw = np.load(train_path)
+    if max_train and len(train_raw) > max_train:
+        train_raw = train_raw[:max_train]
+    train_imgs = train_raw.astype(np.float32)[:, np.newaxis, :, :] / 255.0
+
+    # 2. Val healthy
+    val_raw = np.load(val_path)
+    if max_val and len(val_raw) > max_val:
+        val_raw = val_raw[:max_val]
+    val_imgs = val_raw.astype(np.float32)[:, np.newaxis, :, :] / 255.0
+
+    # 3. Test healthy
+    test_h_raw = np.load(test_h_path)
+    if max_test_healthy and len(test_h_raw) > max_test_healthy:
+        test_h_raw = test_h_raw[:max_test_healthy]
+    test_h_imgs = test_h_raw.astype(np.float32)[:, np.newaxis, :, :] / 255.0
+
+    # 4. Test pathological
+    test_p_raw = np.load(test_p_path)
+    if max_patho_test and len(test_p_raw) > max_patho_test:
+        test_p_raw = test_p_raw[:max_patho_test]
+    test_p_imgs = test_p_raw.astype(np.float32)[:, np.newaxis, :, :] / 255.0
+
+    train_ds = BrainMRISliceDataset(
+        images=train_imgs,
+        masks=np.zeros_like(train_imgs),
+        labels=np.zeros(len(train_imgs), dtype=np.int64),
+    )
+    val_ds = BrainMRISliceDataset(
+        images=val_imgs,
+        masks=np.zeros_like(val_imgs),
+        labels=np.zeros(len(val_imgs), dtype=np.int64),
+    )
+
+    test_imgs = np.concatenate([test_h_imgs, test_p_imgs], axis=0)
+    test_lbls = np.concatenate(
+        [np.zeros(len(test_h_imgs), dtype=np.int64), np.ones(len(test_p_imgs), dtype=np.int64)],
+        axis=0,
+    )
+    test_msks = (test_imgs > 0.35).astype(np.float32) * test_lbls[:, np.newaxis, np.newaxis, np.newaxis]
+
+    perm = rng.permutation(len(test_imgs))
+    test_ds = BrainMRISliceDataset(
+        images=test_imgs[perm],
+        masks=test_msks[perm],
+        labels=test_lbls[perm],
+    )
+
+    return train_ds, val_ds, test_ds
+
+
 def get_uad_dataloaders(
-    dataset_source: str = "medmnist",
+    dataset_source: str = "dataset_128",
     dataset_name: str = "OrganAMNIST",
     batch_size: int = 16,
     image_size: int = 128,
+    axial_only: bool = True,
+    max_patho_samples: Optional[int] = 30,
+    max_train_samples: Optional[int] = None,
+    max_val_samples: Optional[int] = None,
     num_workers: int = 0,
     seed: int = 42,
 ) -> Tuple[DataLoader, DataLoader, DataLoader]:
     """
     Factory function returning (train_loader, val_loader, test_loader).
-    Supports dataset_source="medmnist" (official MedMNIST) and dataset_source="phantom" (synthetic brain).
+    Supports:
+    - 'dataset_128', '128': Ultra-fast standardized 128x128 Brain MRI dataset (IXI T1 + clinical tumors).
+    - 'ixi_t1', 'ixi', 'ixi-t1': Gold standard normative healthy IXI T1 cranial MRI slices.
+    - 'axial_brain_mri' or 'axial': Clean single-modality Axial brain MRI slices with balanced test cohort.
+    - 'real_brain_mri': Real clinical patient brain MRI scans with letterbox padding.
+    - 'medmnist': Official MedMNIST v2/v3 datasets.
+    - 'phantom': Procedurally synthesized anatomical brain MRI phantoms.
     """
-    if dataset_source.lower() == "medmnist":
+    source_lower = dataset_source.lower()
+    if source_lower in ("dataset_128", "128", "ixi_128"):
+        train_ds, val_ds, test_ds = load_dataset_128_uad_splits(
+            max_train=max_train_samples,
+            max_val=max_val_samples,
+            max_patho_test=max_patho_samples or 60,
+            seed=seed,
+        )
+    elif source_lower in ("ixi_t1", "ixi", "ixi-t1", "ixit1"):
+        # Auto-prefer standardized dataset_128 if available
+        d128_path = Path("data/dataset_128/train_128.npy")
+        if d128_path.is_file():
+            train_ds, val_ds, test_ds = load_dataset_128_uad_splits(
+                max_train=max_train_samples,
+                max_val=max_val_samples,
+                max_patho_test=max_patho_samples or 60,
+                seed=seed,
+            )
+        else:
+            try:
+                train_ds, val_ds, test_ds = load_ixi_t1_uad_splits(
+                    image_size=image_size,
+                    max_train=max_train_samples or 5000,
+                    max_val=max_val_samples or 800,
+                    max_patho_test=max_patho_samples or 30,
+                    seed=seed,
+                )
+            except Exception as e:
+                print(f"Warning: IXI T1 loading failed ({e}). Falling back to Axial Brain MRI.")
+                train_ds, val_ds, test_ds = load_axial_brain_mri_uad_splits(
+                    image_size=image_size, max_patho_test=max_patho_samples or 30, seed=seed
+                )
+    elif source_lower in ("axial_brain_mri", "axial", "axial_mri"):
+        try:
+            train_ds, val_ds, test_ds = load_axial_brain_mri_uad_splits(
+                image_size=image_size, max_patho_test=max_patho_samples or 30, seed=seed
+            )
+        except Exception as e:
+            print(f"Warning: Axial MRI loading failed ({e}). Falling back to HighFidelityBrainPhantom.")
+            train_ds, val_ds, test_ds = create_uad_data_splits(image_size=image_size, seed=seed)
+    elif source_lower in ("real_brain_mri", "real", "brain"):
+        try:
+            train_ds, val_ds, test_ds = load_real_brain_mri_uad_splits(
+                image_size=image_size, axial_only=axial_only, max_patho_samples=max_patho_samples, seed=seed
+            )
+        except Exception as e:
+            print(f"Warning: Real Brain MRI loading failed ({e}). Falling back to HighFidelityBrainPhantom.")
+            train_ds, val_ds, test_ds = create_uad_data_splits(image_size=image_size, seed=seed)
+    elif source_lower == "medmnist":
         try:
             train_ds, val_ds, test_ds = load_medmnist_uad_splits(
                 dataset_name=dataset_name,
@@ -365,3 +773,4 @@ def get_uad_dataloaders(
     )
 
     return train_loader, val_loader, test_loader
+

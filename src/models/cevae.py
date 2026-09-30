@@ -1,21 +1,41 @@
 """
-ceVAE+ (Enhanced Context-Encoding Variational Autoencoder) Architecture.
-Bridges trade-offs in Baur et al. (2021) and Zimmerer et al. (2019):
-- Dense bottleneck (16384 -> 128) with NO spatial skip connections to eliminate pathology leakage.
-- InstanceNorm2d + Bilinear Upsampling + Conv to prevent checkerboard artifacts and edge blur.
-- Dual-pass context inpainting training + input-level KL gradient saliency inference.
+Spatial ceVAE (Spatial Context-Encoding Variational Autoencoder) Architecture.
+Solves the fundamental blurriness of 1D bottleneck VAEs in Medical Brain MRI:
+- Preserves 2D topological feature grids in latent space (16 x 16 x 16) instead of collapsing into a 1D vector.
+- Eliminates the 2.1-million parameter dense linear bottleneck that acted as an aggressive low-pass blur filter.
+- Retains 64x spatial area compression (8x downsampling) to prevent pathological lesion leakage.
+- Incorporates residual refinement blocks to preserve fine sulcal, gyral, and ventricular boundaries.
+- Preserves context-encoding (ceVAE) dual-pass inpainting for robust unsupervised anomaly detection.
 """
 
 from typing import Tuple, Dict, Optional
 import torch
 import torch.nn as nn
-from src.models.layers import DownsampleBlock, UpsampleBlock
+
+
+class ResBlock2d(nn.Module):
+    """
+    Residual block with InstanceNorm2d and LeakyReLU for sharp anatomical edge preservation.
+    """
+
+    def __init__(self, channels: int, negative_slope: float = 0.2):
+        super().__init__()
+        self.conv1 = nn.Conv2d(channels, channels, kernel_size=3, padding=1)
+        self.norm1 = nn.InstanceNorm2d(channels, affine=True)
+        self.act = nn.LeakyReLU(negative_slope=negative_slope, inplace=True)
+        self.conv2 = nn.Conv2d(channels, channels, kernel_size=3, padding=1)
+        self.norm2 = nn.InstanceNorm2d(channels, affine=True)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        residual = x
+        out = self.norm2(self.conv2(self.act(self.norm1(self.conv1(x)))))
+        return residual + out
 
 
 class Encoder(nn.Module):
     """
-    4-stage convolutional downsampling encoder.
-    Maps 1 x 128 x 128 -> 256 x 8 x 8 feature map.
+    Hierarchical 3-stage spatial downsampling encoder.
+    Maps 1 x 128 x 128 input -> 128 x 16 x 16 feature map.
     """
 
     def __init__(self, in_channels: int = 1, base_channels: int = 32, negative_slope: float = 0.2):
@@ -23,40 +43,54 @@ class Encoder(nn.Module):
         c1 = base_channels       # 32
         c2 = base_channels * 2   # 64
         c3 = base_channels * 4   # 128
-        c4 = base_channels * 8   # 256
 
-        self.stage1 = DownsampleBlock(in_channels, c1, negative_slope=negative_slope)  # 128 -> 64
-        self.stage2 = DownsampleBlock(c1, c2, negative_slope=negative_slope)           # 64 -> 32
-        self.stage3 = DownsampleBlock(c2, c3, negative_slope=negative_slope)           # 32 -> 16
-        self.stage4 = DownsampleBlock(c3, c4, negative_slope=negative_slope)           # 16 -> 8
+        self.init_conv = nn.Sequential(
+            nn.Conv2d(in_channels, c1, kernel_size=3, padding=1),
+            nn.InstanceNorm2d(c1, affine=True),
+            nn.LeakyReLU(negative_slope=negative_slope, inplace=True),
+        )
+        # Stage 1: 128 -> 64
+        self.down1 = nn.Sequential(
+            nn.Conv2d(c1, c2, kernel_size=4, stride=2, padding=1),
+            nn.InstanceNorm2d(c2, affine=True),
+            nn.LeakyReLU(negative_slope=negative_slope, inplace=True),
+        )
+        # Stage 2: 64 -> 32
+        self.down2 = nn.Sequential(
+            nn.Conv2d(c2, c3, kernel_size=4, stride=2, padding=1),
+            nn.InstanceNorm2d(c3, affine=True),
+            nn.LeakyReLU(negative_slope=negative_slope, inplace=True),
+        )
+        # Stage 3: 32 -> 16 with residual refinement
+        self.down3 = nn.Sequential(
+            nn.Conv2d(c3, c3, kernel_size=4, stride=2, padding=1),
+            nn.InstanceNorm2d(c3, affine=True),
+            nn.LeakyReLU(negative_slope=negative_slope, inplace=True),
+            ResBlock2d(c3, negative_slope=negative_slope),
+        )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = self.stage1(x)
-        x = self.stage2(x)
-        x = self.stage3(x)
-        x = self.stage4(x)
-        return x
+        h = self.init_conv(x)
+        h = self.down1(h)
+        h = self.down2(h)
+        h = self.down3(h)
+        return h
 
 
 class Bottleneck(nn.Module):
     """
-    Dense 1D bottleneck with reparameterization trick.
-    Maps 256 x 8 x 8 (16384) -> mu, logvar in R^128 -> sampled latent z in R^128.
-    Strictly avoids spatial skip connections to prevent lesion leakage.
+    Spatial VAE Bottleneck.
+    Maps 128 x 16 x 16 feature map -> mu, logvar of shape (B, latent_channels, 16, 16).
+    Preserves 2D spatial locality and topological neighborhoods.
     """
 
-    def __init__(self, flattened_dim: int = 16384, latent_dim: int = 128):
+    def __init__(self, in_channels: int = 128, latent_channels: int = 16):
         super().__init__()
-        self.flattened_dim = flattened_dim
-        self.latent_dim = latent_dim
-
-        self.fc_mu = nn.Linear(flattened_dim, latent_dim)
-        self.fc_logvar = nn.Linear(flattened_dim, latent_dim)
+        self.latent_channels = latent_channels
+        self.conv_mu = nn.Conv2d(in_channels, latent_channels, kernel_size=1)
+        self.conv_logvar = nn.Conv2d(in_channels, latent_channels, kernel_size=1)
 
     def reparameterize(self, mu: torch.Tensor, logvar: torch.Tensor) -> torch.Tensor:
-        """
-        z = mu + eps * sigma, eps ~ N(0, I)
-        """
         if self.training:
             std = torch.exp(0.5 * logvar)
             eps = torch.randn_like(std)
@@ -64,80 +98,83 @@ class Bottleneck(nn.Module):
         return mu
 
     def forward(self, h: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """
-        Args:
-            h: Tensor (B, 256, 8, 8)
-        Returns:
-            z: Sampled latent vector (B, 128)
-            mu: Mean vector (B, 128)
-            logvar: Log-variance vector (B, 128)
-        """
-        h_flat = torch.flatten(h, start_dim=1)
-        mu = self.fc_mu(h_flat)
-        logvar = self.fc_logvar(h_flat)
-        # Numerical safeguard on logvar
-        logvar = torch.clamp(logvar, min=-15.0, max=10.0)
+        mu = self.conv_mu(h)
+        logvar = torch.clamp(self.conv_logvar(h), min=-15.0, max=10.0)
         z = self.reparameterize(mu, logvar)
         return z, mu, logvar
 
 
 class Decoder(nn.Module):
     """
-    Checkerboard-free upsampling decoder.
-    Expands latent z (128) -> 256 x 8 x 8 -> 4 bilinear upsample stages -> 1 x 128 x 128.
-    Final activation: Sigmoid() for intensity range [0.0, 1.0].
+    Hierarchical 3-stage spatial upsampling decoder with residual refinement.
+    Maps latent z (B, 16, 16, 16) -> 1 x 128 x 128 sharp reconstruction.
     """
 
     def __init__(
         self,
-        latent_dim: int = 128,
-        flattened_dim: int = 16384,
+        latent_channels: int = 16,
         base_channels: int = 32,
         out_channels: int = 1,
         negative_slope: float = 0.2,
     ):
         super().__init__()
-        self.base_channels = base_channels
-        self.c4 = base_channels * 8  # 256
-
-        self.fc_dec = nn.Sequential(
-            nn.Linear(latent_dim, flattened_dim),
-            nn.LeakyReLU(negative_slope=negative_slope, inplace=True),
-        )
-
         c1 = base_channels       # 32
         c2 = base_channels * 2   # 64
         c3 = base_channels * 4   # 128
-        c4 = base_channels * 8   # 256
 
-        self.up1 = UpsampleBlock(c4, c3, negative_slope=negative_slope)  # 8 -> 16
-        self.up2 = UpsampleBlock(c3, c2, negative_slope=negative_slope)  # 16 -> 32
-        self.up3 = UpsampleBlock(c2, c1, negative_slope=negative_slope)  # 32 -> 64
-        self.up4 = UpsampleBlock(c1, c1, negative_slope=negative_slope)  # 64 -> 128
-
+        self.init_conv = nn.Sequential(
+            nn.Conv2d(latent_channels, c3, kernel_size=1),
+            ResBlock2d(c3, negative_slope=negative_slope),
+        )
+        # Stage 1: 16 -> 32
+        self.up1 = nn.Sequential(
+            nn.Upsample(scale_factor=2, mode="bilinear", align_corners=False),
+            nn.Conv2d(c3, c3, kernel_size=3, padding=1),
+            nn.InstanceNorm2d(c3, affine=True),
+            nn.LeakyReLU(negative_slope=negative_slope, inplace=True),
+        )
+        # Stage 2: 32 -> 64
+        self.up2 = nn.Sequential(
+            nn.Upsample(scale_factor=2, mode="bilinear", align_corners=False),
+            nn.Conv2d(c3, c2, kernel_size=3, padding=1),
+            nn.InstanceNorm2d(c2, affine=True),
+            nn.LeakyReLU(negative_slope=negative_slope, inplace=True),
+        )
+        # Stage 3: 64 -> 128 with edge refinement
+        self.up3 = nn.Sequential(
+            nn.Upsample(scale_factor=2, mode="bilinear", align_corners=False),
+            nn.Conv2d(c2, c1, kernel_size=3, padding=1),
+            nn.InstanceNorm2d(c1, affine=True),
+            nn.LeakyReLU(negative_slope=negative_slope, inplace=True),
+            ResBlock2d(c1, negative_slope=negative_slope),
+            nn.InstanceNorm2d(c1, affine=True),
+        )
+        # Final output layer
         self.final_conv = nn.Sequential(
-            nn.Conv2d(c1, out_channels, kernel_size=3, stride=1, padding=1),
+            nn.Conv2d(c1, out_channels, kernel_size=3, padding=1),
             nn.Sigmoid(),
         )
+        # Initialize final conv to prevent early saturation
+        nn.init.kaiming_normal_(self.final_conv[0].weight, mode="fan_out", nonlinearity="linear")
+        self.final_conv[0].weight.data.mul_(0.1)
+        self.final_conv[0].bias.data.zero_()
 
     def forward(self, z: torch.Tensor) -> torch.Tensor:
-        h = self.fc_dec(z)
-        h = h.view(-1, self.c4, 8, 8)
+        h = self.init_conv(z)
         h = self.up1(h)
         h = self.up2(h)
         h = self.up3(h)
-        h = self.up4(h)
-        x_recon = self.final_conv(h)
-        return x_recon
+        return self.final_conv(h)
 
 
 class EnhancedContextVAE(nn.Module):
     """
-    Enhanced Context-Encoding Variational Autoencoder (ceVAE+).
+    Spatial Context-Encoding Variational Autoencoder (Spatial ceVAE).
     Integrates:
-    - Encoder + Bottleneck + Decoder
-    - Clean forward pass + Inpainting forward pass
-    - Differentiable analytical KL computation
+    - Spatial Encoder (128x128 -> 16x16x128)
+    - Spatial Bottleneck (16x16x128 -> 16x16x16 spatial latents)
+    - Spatial Decoder with Residual Edge Refinement (16x16x16 -> 128x128x1)
+    - Dual-Pass Training (Clean Pass + Context-Inpainting Erased Pass)
     """
 
     def __init__(
@@ -145,16 +182,19 @@ class EnhancedContextVAE(nn.Module):
         in_channels: int = 1,
         image_size: int = 128,
         base_channels: int = 32,
-        latent_dim: int = 128,
+        latent_dim: int = 16,  # Spatial latent channels (16x16x16 = 4096 spatial latents)
         negative_slope: float = 0.2,
     ):
         super().__init__()
-        self.encoder = Encoder(in_channels, base_channels, negative_slope=negative_slope)
-        flattened_dim = (base_channels * 8) * 8 * 8  # 256 * 8 * 8 = 16384
-        self.bottleneck = Bottleneck(flattened_dim=flattened_dim, latent_dim=latent_dim)
+        self.in_channels = in_channels
+        self.image_size = image_size
+        self.base_channels = base_channels
+        self.latent_dim = latent_dim
+
+        self.encoder = Encoder(in_channels=in_channels, base_channels=base_channels, negative_slope=negative_slope)
+        self.bottleneck = Bottleneck(in_channels=base_channels * 4, latent_channels=latent_dim)
         self.decoder = Decoder(
-            latent_dim=latent_dim,
-            flattened_dim=flattened_dim,
+            latent_channels=latent_dim,
             base_channels=base_channels,
             out_channels=in_channels,
             negative_slope=negative_slope,
@@ -171,12 +211,7 @@ class EnhancedContextVAE(nn.Module):
     def forward(
         self, x_clean: torch.Tensor, x_masked: Optional[torch.Tensor] = None
     ) -> Dict[str, torch.Tensor]:
-        """
-        Executes dual forward pass:
-        1. Clean pass: x_clean -> z_clean -> x_recon_clean
-        2. Inpaint pass (if x_masked provided): x_masked -> z_masked -> x_recon_inpaint
-        """
-        # Pass 1: Clean
+        # 1. Clean forward pass
         z_clean, mu_clean, logvar_clean = self.encode(x_clean)
         recon_clean = self.decode(z_clean)
 
@@ -187,7 +222,7 @@ class EnhancedContextVAE(nn.Module):
             "z": z_clean,
         }
 
-        # Pass 2: Inpainted pass
+        # 2. Context-inpainting pass
         if x_masked is not None:
             z_masked, mu_masked, logvar_masked = self.encode(x_masked)
             recon_inpaint = self.decode(z_masked)

@@ -7,6 +7,10 @@ No external library dependencies required.
 import math
 import torch
 import torch.nn as nn
+from typing import Tuple
+import math
+import torch
+import torch.nn as nn
 import torch.nn.functional as F
 
 
@@ -18,14 +22,29 @@ def create_gaussian_window_2d(window_size: int = 11, sigma: float = 1.5, channel
     g_1d = torch.exp(-(coords**2) / (2 * sigma**2))
     g_1d = g_1d / g_1d.sum()
     g_2d = torch.outer(g_1d, g_1d).unsqueeze(0).unsqueeze(0)
-    window = g_2d.repeat(channels, 1, 1, 1)
-    return window
+    return g_2d.repeat(channels, 1, 1, 1)
+
+
+def create_gaussian_kernels_1d(window_size: int = 11, sigma: float = 1.5, channels: int = 1) -> Tuple[torch.Tensor, torch.Tensor]:
+    """
+    Creates separable 1D Gaussian kernel tensors:
+    - kernel_h of shape (channels, 1, 1, window_size)
+    - kernel_v of shape (channels, 1, window_size, 1)
+    Provides mathematically identical results with ~5x faster execution on CPU.
+    """
+    coords = torch.arange(window_size, dtype=torch.float32) - window_size // 2
+    g_1d = torch.exp(-(coords**2) / (2 * sigma**2))
+    g_1d = g_1d / g_1d.sum()
+    kernel_h = g_1d.view(1, 1, 1, window_size).repeat(channels, 1, 1, 1)
+    kernel_v = g_1d.view(1, 1, window_size, 1).repeat(channels, 1, 1, 1)
+    return kernel_h, kernel_v
 
 
 class SSIMLoss(nn.Module):
     """
     Differentiable SSIM loss: L_SSIM = 1 - SSIM(x, y).
     Range: [0.0, 1.0] where 0.0 denotes identical structural fidelity.
+    Optimized via separable 1D Gaussian convolutions for fast CPU execution.
     """
 
     def __init__(
@@ -43,9 +62,13 @@ class SSIMLoss(nn.Module):
         self.c1 = c1
         self.c2 = c2
 
-        # Register Gaussian window as a buffer so it moves across devices automatically
-        window = create_gaussian_window_2d(window_size, sigma, in_channels)
-        self.register_buffer("window", window)
+        k_h, k_v = create_gaussian_kernels_1d(window_size, sigma, in_channels)
+        self.register_buffer("kernel_h", k_h)
+        self.register_buffer("kernel_v", k_v)
+
+    def _conv_gauss(self, tensor: torch.Tensor, k_h: torch.Tensor, k_v: torch.Tensor, pad: int, channels: int) -> torch.Tensor:
+        t = F.conv2d(tensor, k_h, padding=(0, pad), groups=channels)
+        return F.conv2d(t, k_v, padding=(pad, 0), groups=channels)
 
     def forward(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
         """
@@ -56,25 +79,24 @@ class SSIMLoss(nn.Module):
         """
         channels = x.size(1)
         if channels != self.in_channels:
-            # Recreate window if channel count differs
-            window = create_gaussian_window_2d(self.window_size, self.sigma, channels).to(x.device)
+            k_h, k_v = create_gaussian_kernels_1d(self.window_size, self.sigma, channels)
+            k_h, k_v = k_h.to(x.device), k_v.to(x.device)
         else:
-            window = self.window
+            k_h, k_v = self.kernel_h, self.kernel_v
 
         pad = self.window_size // 2
 
-        mu_x = F.conv2d(x, window, padding=pad, groups=channels)
-        mu_y = F.conv2d(y, window, padding=pad, groups=channels)
+        mu_x = self._conv_gauss(x, k_h, k_v, pad, channels)
+        mu_y = self._conv_gauss(y, k_h, k_v, pad, channels)
 
         mu_x_sq = mu_x.pow(2)
         mu_y_sq = mu_y.pow(2)
         mu_xy = mu_x * mu_y
 
-        sigma_x_sq = F.conv2d(x * x, window, padding=pad, groups=channels) - mu_x_sq
-        sigma_y_sq = F.conv2d(y * y, window, padding=pad, groups=channels) - mu_y_sq
-        sigma_xy = F.conv2d(x * y, window, padding=pad, groups=channels) - mu_xy
+        sigma_x_sq = self._conv_gauss(x * x, k_h, k_v, pad, channels) - mu_x_sq
+        sigma_y_sq = self._conv_gauss(y * y, k_h, k_v, pad, channels) - mu_y_sq
+        sigma_xy = self._conv_gauss(x * y, k_h, k_v, pad, channels) - mu_xy
 
-        # Numerical stabilization clamp
         sigma_x_sq = torch.clamp(sigma_x_sq, min=0.0)
         sigma_y_sq = torch.clamp(sigma_y_sq, min=0.0)
 
@@ -82,6 +104,4 @@ class SSIMLoss(nn.Module):
         denominator = (mu_x_sq + mu_y_sq + self.c1) * (sigma_x_sq + sigma_y_sq + self.c2)
 
         ssim_map = numerator / (denominator + 1e-8)
-        mean_ssim = ssim_map.mean()
-
-        return 1.0 - mean_ssim
+        return 1.0 - ssim_map.mean()

@@ -87,7 +87,10 @@ class DiagnosticAnomalyScorer:
 
         # 2. Input-level KL gradient saliency
         # Analytical KL divergence per sample
-        kl_per_sample = -0.5 * torch.sum(1.0 + logvar - mu.pow(2) - torch.exp(logvar), dim=-1)
+        if mu.dim() > 2:
+            kl_per_sample = -0.5 * torch.mean(1.0 + logvar - mu.pow(2) - torch.exp(logvar), dim=(1, 2, 3))
+        else:
+            kl_per_sample = -0.5 * torch.sum(1.0 + logvar - mu.pow(2) - torch.exp(logvar), dim=-1)
         kl_sum = kl_per_sample.sum()
 
         # Compute gradient d(L_KL) / dx

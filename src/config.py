@@ -12,9 +12,9 @@ import torch
 class ModelConfig:
     in_channels: int = 1
     image_size: int = 128
-    base_channels: int = 32  # 32 -> 64 -> 128 -> 256
-    latent_dim: int = 128
-    flattened_dim: int = 256 * 8 * 8  # 16384 for 128x128 input after 4 downsamplings
+    base_channels: int = 32  # 32 -> 64 -> 128
+    latent_dim: int = 16  # Spatial latent channels (16 x 16 x 16)
+    flattened_dim: int = 16 * 16 * 16  # 4096
     leaky_relu_slope: float = 0.2
 
 
@@ -28,12 +28,14 @@ class MaskingConfig:
 
 @dataclass
 class LossConfig:
-    l1_weight: float = 0.8
+    bce_weight: float = 1.0
+    l1_weight: float = 0.5
     ssim_weight: float = 0.2
-    beta_kl: float = 0.001
+    edge_weight: float = 0.1
+    beta_kl: float = 0.002
     clean_loss_weight: float = 0.5
     inpaint_loss_weight: float = 0.5
-    kl_warmup_epochs: int = 5  # Linear warmup to prevent posterior collapse
+    kl_warmup_epochs: int = 3  # Linear warmup to prevent posterior collapse
 
 
 @dataclass
