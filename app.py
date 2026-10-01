@@ -174,7 +174,7 @@ def array_to_base64_png(arr: np.ndarray, colormap: Optional[str] = None) -> str:
 def create_segmentation_overlay(
     input_slice: np.ndarray,
     anomaly_map: np.ndarray,
-    threshold: float = 0.35,
+    threshold: float = 0.28,
     gt_mask: Optional[np.ndarray] = None,
     is_known_healthy: bool = False,
 ) -> Dict[str, Any]:
@@ -196,16 +196,8 @@ def create_segmentation_overlay(
     if is_known_healthy:
         pred_bin = np.zeros_like(x_img, dtype=bool)
     else:
-        # Check if scan has substantial anomaly above baseline noise floor
-        parench_vals = a_map[brain_parenchyma] if np.any(brain_parenchyma) else a_map.flatten()
-        a_max = float(np.max(parench_vals))
-        p95 = float(np.percentile(parench_vals, 95))
-
-        if p95 < 0.055 or a_max < 0.10:
-            pred_bin = np.zeros_like(x_img, dtype=bool)
-        else:
-            norm_anom = np.clip(a_map / max(0.18, a_max), 0.0, 1.0)
-            pred_bin = (norm_anom >= threshold) & brain_parenchyma
+        # Direct calibrated thresholding on Gaussian-smoothed dual-scoring anomaly map
+        pred_bin = (a_map >= threshold) & brain_parenchyma
 
     lesion_pixels = int(np.sum(pred_bin))
     lesion_area_pct = float((lesion_pixels / max(1, parenchyma_pixels)) * 100.0)
@@ -304,14 +296,17 @@ def get_presets():
             f_path = Path(v["file_path"])
             if f_path.is_file():
                 with open(f_path, "rb") as fp:
-                    arr, _ = process_any_image_input(fp.read(), f_path.name)
-                preview_b64 = array_to_base64_png(arr)
+                    arr, _, raw_b64 = process_any_image_input(fp.read(), f_path.name)
+                thumb_b64 = raw_b64
+                proc_thumb_b64 = array_to_base64_png(arr)
             else:
                 arr, _ = HighFidelityBrainPhantom.generate_slice(128, is_pathological=v["pathological"], seed=100)
-                preview_b64 = array_to_base64_png(arr)
+                thumb_b64 = array_to_base64_png(arr)
+                proc_thumb_b64 = thumb_b64
         else:
             arr, _ = HighFidelityBrainPhantom.generate_slice(128, is_pathological=v["pathological"], seed=v["seed"])
-            preview_b64 = array_to_base64_png(arr)
+            thumb_b64 = array_to_base64_png(arr)
+            proc_thumb_b64 = thumb_b64
 
         presets.append({
             "id": v["id"],
@@ -319,24 +314,27 @@ def get_presets():
             "description": v["description"],
             "pathological": v["pathological"],
             "seed": v.get("seed", 0),
-            "thumbnail": preview_b64,
+            "thumbnail": thumb_b64,
+            "processed_thumbnail": proc_thumb_b64,
         })
     return presets
 
 
-
-def process_any_image_input(contents: bytes, filename: str = "", target_size: int = 128) -> Tuple[np.ndarray, Dict[str, Any]]:
+def process_any_image_input(contents: bytes, filename: str = "", target_size: int = 128) -> Tuple[np.ndarray, Dict[str, Any], str]:
     """
     Decodes, standardizes, and formats ANY uploaded image into the strict format required by ceVAE+:
     - Supports PNG, JPG, JPEG, WEBP, BMP, TIFF, GIF, NPY, 16-bit, RGBA, RGB, Grayscale
     - Automatically handles square OR RECTANGULAR images of arbitrary high resolution
     - Uses anatomical letterbox padding (proportional bilinear downsampling centered on black canvas)
       to PREVENT non-square anatomical squishing/distortion
-    - Normalizes intensities strictly to [0.0, 1.0]
+    - Normalizes intensities strictly to [0.0, 1.0] matching training data radiometry (/ 255.0)
     Returns:
-        (input_slice, metadata_dict)
+        (norm_arr, metadata_dict, raw_input_b64)
     """
     filename_lower = filename.lower()
+    raw_input_b64 = ""
+    orig_is_float_01 = False
+
     if filename_lower.endswith(".npy"):
         raw_arr = np.load(io.BytesIO(contents))
         orig_shape = list(raw_arr.shape)
@@ -345,16 +343,42 @@ def process_any_image_input(contents: bytes, filename: str = "", target_size: in
             raw_arr = np.squeeze(raw_arr)
             if raw_arr.ndim > 2:
                 raw_arr = raw_arr[0]
-        arr = raw_arr.astype(np.float32)
-        pil_arr = Image.fromarray(arr)
-        pil_img = pil_arr.convert("L")
-        orig_w, orig_h = pil_img.size
-    else:
-        pil_img = Image.open(io.BytesIO(contents))
-        orig_w, orig_h = pil_img.size
-        orig_shape = [orig_h, orig_w]
-        orig_mode = pil_img.mode
+        orig_h, orig_w = raw_arr.shape[:2]
 
+        if np.issubdtype(raw_arr.dtype, np.floating) and raw_arr.max() <= 1.0 and raw_arr.min() >= 0.0:
+            orig_is_float_01 = True
+            disp_arr = (np.clip(raw_arr, 0.0, 1.0) * 255).astype(np.uint8)
+        else:
+            disp_min, disp_max = float(raw_arr.min()), float(raw_arr.max())
+            if disp_max > disp_min:
+                disp_arr = ((raw_arr - disp_min) / (disp_max - disp_min) * 255).astype(np.uint8)
+            else:
+                disp_arr = np.zeros_like(raw_arr, dtype=np.uint8)
+
+        pil_raw_disp = Image.fromarray(disp_arr)
+        raw_buf = io.BytesIO()
+        pil_raw_disp.save(raw_buf, format="PNG")
+        raw_input_b64 = f"data:image/png;base64,{base64.b64encode(raw_buf.getvalue()).decode('utf-8')}"
+
+        arr_for_resize = raw_arr.astype(np.float32)
+        pil_img = Image.fromarray(arr_for_resize).convert("L")
+    else:
+        pil_raw = Image.open(io.BytesIO(contents))
+        orig_w, orig_h = pil_raw.size
+        orig_shape = [orig_h, orig_w]
+        orig_mode = pil_raw.mode
+
+        # Generate pristine raw image base64 directly from original image
+        raw_buf = io.BytesIO()
+        if pil_raw.mode in ("RGBA", "LA") or (pil_raw.mode == "P" and "transparency" in pil_raw.info):
+            pil_raw.save(raw_buf, format="PNG")
+        elif pil_raw.mode in ("RGB", "L"):
+            pil_raw.save(raw_buf, format="PNG")
+        else:
+            pil_raw.convert("RGB").save(raw_buf, format="PNG")
+        raw_input_b64 = f"data:image/png;base64,{base64.b64encode(raw_buf.getvalue()).decode('utf-8')}"
+
+        pil_img = pil_raw.copy()
         # If RGBA, blend over black background
         if pil_img.mode == "RGBA":
             bg = Image.new("RGB", pil_img.size, (0, 0, 0))
@@ -380,12 +404,18 @@ def process_any_image_input(contents: bytes, filename: str = "", target_size: in
 
     arr = np.array(canvas, dtype=np.float32)
 
-    # Normalize pixel intensity strictly to [0.0, 1.0]
+    # Normalize pixel intensity strictly to [0.0, 1.0] matching ceVAE+ training distribution
     a_min, a_max = float(arr.min()), float(arr.max())
-    if a_max > a_min:
-        norm_arr = (arr - a_min) / (a_max - a_min)
+    if orig_is_float_01:
+        norm_arr = np.clip(arr, 0.0, 1.0)
+        norm_method = "Preserved Float [0.0, 1.0]"
+    elif a_max > 255.0:
+        norm_arr = np.clip(arr / max(1.0, a_max), 0.0, 1.0)
+        norm_method = f"Wide-Range Rescaled (/ {int(a_max)})"
     else:
-        norm_arr = np.zeros((target_size, target_size), dtype=np.float32)
+        # Standard 8-bit image: divide strictly by 255.0 (calibrated with training dataset)
+        norm_arr = np.clip(arr / 255.0, 0.0, 1.0)
+        norm_method = "Calibrated Medical Scaling (/ 255.0)"
 
     is_rect = abs(orig_w - orig_h) > 2
     aspect_ratio_str = f"{orig_w / max(1, orig_h):.2f}:1"
@@ -397,10 +427,12 @@ def process_any_image_input(contents: bytes, filename: str = "", target_size: in
         "letterbox_padding": f"Left/Right: {pad_x}px, Top/Bottom: {pad_y}px",
         "original_mode": orig_mode,
         "processed_format": f"1 × 1 × {target_size} × {target_size} Float32 [0.0, 1.0]",
-        "intensity_range_before": f"[{round(a_min, 2)}, {round(a_max, 2)}]",
-        "status": "Letterbox Centered (Zero Distortion)",
+        "intensity_range_before": f"[{round(a_min, 1)}, {round(a_max, 1)}]",
+        "intensity_range_after": f"[{round(float(norm_arr.min()), 3)}, {round(float(norm_arr.max()), 3)}]",
+        "normalization_method": norm_method,
+        "status": "Letterbox Centered (Zero Geometric Distortion)",
     }
-    return norm_arr.astype(np.float32), metadata
+    return norm_arr.astype(np.float32), metadata, raw_input_b64
 
 
 @app.post("/api/diagnose")
@@ -410,7 +442,7 @@ async def diagnose_slice(
     generate_random: Optional[bool] = Form(False),
     pathological: Optional[bool] = Form(True),
     seed: Optional[int] = Form(None),
-    threshold: float = Form(0.35),
+    threshold: float = Form(0.28),
     gaussian_sigma: float = Form(1.5),
 ):
     """
@@ -425,13 +457,14 @@ async def diagnose_slice(
     case_name = "Uploaded MRI Scan"
     file_telemetry = None
     is_known_healthy = False
+    raw_input_b64 = ""
 
     # 1. Parse & Standardize Image Input
     if file is not None and file.filename:
         case_name = f"Uploaded Scan: {file.filename}"
         contents = await file.read()
         try:
-            input_slice, file_telemetry = process_any_image_input(contents, file.filename)
+            input_slice, file_telemetry, raw_input_b64 = process_any_image_input(contents, file.filename)
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Failed to process uploaded image: {str(e)}")
 
@@ -441,21 +474,24 @@ async def diagnose_slice(
         if preset.get("source") == "file":
             f_path = Path(preset["file_path"])
             with open(f_path, "rb") as fp:
-                input_slice, file_telemetry = process_any_image_input(fp.read(), f_path.name)
+                input_slice, file_telemetry, raw_input_b64 = process_any_image_input(fp.read(), f_path.name)
             is_known_healthy = not preset["pathological"]
             gt_mask = None
         else:
             input_slice, gt_mask = HighFidelityBrainPhantom.generate_slice(
                 128, is_pathological=preset["pathological"], seed=preset["seed"]
             )
+            raw_input_b64 = array_to_base64_png(input_slice)
             file_telemetry = {
                 "filename": f"Preset: {preset['title']}",
                 "original_dimensions": "128 × 128 px",
                 "aspect_ratio": "1.00:1 (Square)",
-                "letterbox_padding": "None",
+                "letterbox_padding": "None (Native 128×128)",
                 "original_mode": "Synthetic T2-FLAIR",
                 "processed_format": "1 × 1 × 128 × 128 Float32 [0.0, 1.0]",
                 "intensity_range_before": "[0.0, 1.0]",
+                "intensity_range_after": "[0.000, 1.000]",
+                "normalization_method": "Native Synthetic Contrast",
                 "status": "Standard Reference Scan Loaded",
             }
 
@@ -465,12 +501,17 @@ async def diagnose_slice(
         input_slice, gt_mask = HighFidelityBrainPhantom.generate_slice(
             128, is_pathological=pathological, seed=curr_seed
         )
+        raw_input_b64 = array_to_base64_png(input_slice)
         file_telemetry = {
             "filename": f"Procedural Scan #{curr_seed}",
             "original_dimensions": "128 × 128 px",
+            "aspect_ratio": "1.00:1 (Square)",
+            "letterbox_padding": "None (Native 128×128)",
             "original_mode": "Procedural T2-FLAIR",
             "processed_format": "1 × 1 × 128 × 128 Float32 [0.0, 1.0]",
             "intensity_range_before": "[0.0, 1.0]",
+            "intensity_range_after": "[0.000, 1.000]",
+            "normalization_method": "Synthesized On-The-Fly",
             "status": "Synthesized On-The-Fly",
         }
 
@@ -481,12 +522,17 @@ async def diagnose_slice(
         input_slice, gt_mask = HighFidelityBrainPhantom.generate_slice(
             128, is_pathological=preset["pathological"], seed=preset["seed"]
         )
+        raw_input_b64 = array_to_base64_png(input_slice)
         file_telemetry = {
             "filename": f"Default Case: {preset['title']}",
             "original_dimensions": "128 × 128 px",
+            "aspect_ratio": "1.00:1 (Square)",
+            "letterbox_padding": "None (Native 128×128)",
             "original_mode": "Clinical Preset",
             "processed_format": "1 × 1 × 128 × 128 Float32 [0.0, 1.0]",
             "intensity_range_before": "[0.0, 1.0]",
+            "intensity_range_after": "[0.000, 1.000]",
+            "normalization_method": "Native Synthetic Contrast",
             "status": "Standard Reference Case",
         }
 
@@ -570,7 +616,7 @@ async def diagnose_slice(
         verdict_color = "success"
         confidence = 97.2
     else:
-        is_pathological = (lesion_pct >= 1.5) or (anomaly_score_95th >= 0.10)
+        is_pathological = (lesion_pct >= 0.8) or (anomaly_score_95th >= 0.22)
         if is_pathological:
             verdict = "PATHOLOGICAL - LESION DETECTED"
             verdict_color = "danger"
@@ -582,7 +628,9 @@ async def diagnose_slice(
 
     # 7. Render Visualizations into Base64 PNGs
     visualizations = {
-        "input_slice": array_to_base64_png(input_slice),
+        "raw_input": raw_input_b64,
+        "processed_input": array_to_base64_png(input_slice),
+        "input_slice": array_to_base64_png(input_slice),  # preserved for backwards compatibility
         "reconstruction": array_to_base64_png(rec_np),
         "subtracted_reconstruction": array_to_base64_png(res_np, colormap="inferno"),
         "subtracted_reconstruction_gray": array_to_base64_png(res_np),
@@ -662,14 +710,15 @@ async def diagnose_slice(
         {
             "step": 1,
             "title": "Input Acquisition & Standardization",
-            "subtitle": "Format Standardization to 1×128×128 Normalized Float",
+            "subtitle": f"Harmonized to 1×128×128 ({file_telemetry.get('normalization_method', 'Normalized Float')})",
             "badge": "Input Preprocessed",
             "description": (
                 f"The image was ingested ({file_telemetry['original_dimensions']}, {file_telemetry['original_mode']}) "
+                f"with letterbox padding ({file_telemetry.get('letterbox_padding', 'None')}) "
                 f"and standardized to exactly 128x128 single-channel floating-point format normalized in [0.0, 1.0]. "
-                "This guarantees uniform feature scale and optimal sensitivity for the latent encoder."
+                "This guarantees uniform anatomical aspect ratio, true tissue radiometry, and optimal sensitivity for the latent encoder."
             ),
-            "clinical_significance": "Intensity harmonization ensures that tissue contrast corresponds directly to anatomical density rather than scanner variation.",
+            "clinical_significance": "Intensity harmonization and aspect-ratio preservation prevent false positive edge anomalies and ensure lesion geometry is preserved.",
         },
         {
             "step": 2,

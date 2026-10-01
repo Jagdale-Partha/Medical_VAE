@@ -7,9 +7,11 @@
 document.addEventListener('DOMContentLoaded', () => {
   // Global State
   let currentCase = null;
-  let activePresetId = 'gbm_parietal';
+  let activePresetId = 'real_gbm_highres';
   let lastUploadedFile = null;
   let subtractionMode = 'inferno'; // 'inferno' | 'gray'
+  let stage1Mode = 'processed'; // 'processed' | 'raw'
+  let compareSourceMode = 'processed'; // 'processed' | 'raw'
 
   // DOM Elements - Telemetry & Ingestion
   const elDevice = document.getElementById('deviceVal');
@@ -20,6 +22,18 @@ document.addEventListener('DOMContentLoaded', () => {
   const elProcFileName = document.getElementById('procFileName');
   const elProcFileDetails = document.getElementById('procFileDetails');
   const elProcStatusPill = document.getElementById('procStatusPill');
+
+  // Input Harmonization Visualizer Card Elements
+  const elImgRawInput = document.getElementById('imgRawInput');
+  const elImgProcessedInput = document.getElementById('imgProcessedInput');
+  const elHRawPill = document.getElementById('hRawPill');
+  const elHProcessedPill = document.getElementById('hProcessedPill');
+  const elRawDimTag = document.getElementById('rawDimTag');
+  const elRawMetaDim = document.getElementById('rawMetaDim');
+  const elRawMetaMode = document.getElementById('rawMetaMode');
+  const elRawMetaAspect = document.getElementById('rawMetaAspect');
+  const elProcMetaRange = document.getElementById('procMetaRange');
+  const elProcMetaPad = document.getElementById('procMetaPad');
 
   // Controls
   const elThresholdSlider = document.getElementById('thresholdSlider');
@@ -52,6 +66,13 @@ document.addEventListener('DOMContentLoaded', () => {
   const elBtnToggleGray = document.getElementById('btnToggleGray');
   const elSubtractionChip = document.getElementById('subtractionChip');
 
+  // Stage 1 Micro Toggles
+  const elBtnToggleStage1Proc = document.getElementById('btnToggleStage1Proc');
+  const elBtnToggleStage1Raw = document.getElementById('btnToggleStage1Raw');
+  const elStage1Title = document.getElementById('stage1Title');
+  const elStage1Chip = document.getElementById('stage1Chip');
+  const elStage1Desc = document.getElementById('stage1Desc');
+
   // Deep-Dive Views
   const elViewTabs = document.querySelectorAll('.view-tab');
   const elPanelCompareView = document.getElementById('panelCompareView');
@@ -65,6 +86,9 @@ document.addEventListener('DOMContentLoaded', () => {
   const elCompareContainer = document.getElementById('compareContainer');
   const elCompareAfterLayer = document.getElementById('compareAfterLayer');
   const elCompareHandle = document.getElementById('compareHandle');
+  const elBtnCompareProc = document.getElementById('btnCompareProc');
+  const elBtnCompareRaw = document.getElementById('btnCompareRaw');
+  const elCompareBeforeTag = document.getElementById('compareBeforeTag');
 
   // Inspector
   const elImgInspectBase = document.getElementById('imgInspectBase');
@@ -194,7 +218,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const meaning = data.diagnostic_meaning || {};
     const vis = data.visualizations;
 
-    // 1. File Ingestion Telemetry Banner
+    // 1. File Ingestion Telemetry Banner & Harmonization Visualizer
     if (data.file_telemetry) {
       const ft = data.file_telemetry;
       elProcFileName.textContent = ft.filename;
@@ -203,7 +227,21 @@ document.addEventListener('DOMContentLoaded', () => {
       elProcFileDetails.textContent = `Original: ${ft.original_dimensions} (${ft.original_mode})${aspectInfo}${padInfo} ➔ Converted: ${ft.processed_format}`;
       elProcStatusPill.textContent = ft.status || "MODEL COMPLIANT (1×128×128)";
       elProcStatusPill.className = "proc-status-pill";
+
+      // Populate Harmonization Preview Card
+      if (elHRawPill) elHRawPill.textContent = `Given: ${ft.original_dimensions}`;
+      if (elRawDimTag) elRawDimTag.textContent = ft.original_dimensions;
+      if (elRawMetaDim) elRawMetaDim.textContent = ft.original_dimensions;
+      if (elRawMetaMode) elRawMetaMode.textContent = ft.original_mode;
+      if (elRawMetaAspect) elRawMetaAspect.textContent = ft.aspect_ratio;
+      if (elProcMetaRange) elProcMetaRange.textContent = ft.intensity_range_after || "[0.0, 1.0]";
+      if (elProcMetaPad) elProcMetaPad.textContent = ft.letterbox_padding || "None (Centered)";
     }
+
+    const rawSrc = vis.raw_input || vis.input_slice;
+    const procSrc = vis.processed_input || vis.input_slice;
+    if (elImgRawInput) elImgRawInput.src = rawSrc;
+    if (elImgProcessedInput) elImgProcessedInput.src = procSrc;
 
     // 2. Main Verdict Banner
     elVerdictTitle.textContent = meaning.headline || data.verdict;
@@ -228,13 +266,13 @@ document.addEventListener('DOMContentLoaded', () => {
     elMeaningHighlightText.textContent = meaning.highlight_meaning || "Dual-scoring with autograd KL gradient isolates genuine focal pathology.";
 
     // 4. Update Core 4-Stage Visual Cards
-    elImgInput.src = vis.input_slice;
+    updateStage1Image(vis, data);
     elImgRecon.src = vis.reconstruction;
     updateSubtractionImage(vis);
     elImgHighlighted.src = vis.highlighted_differences || vis.segmentation_overlay;
 
     // 5. Update Comparison Split Wipe Slider
-    elImgCompareInput.src = vis.input_slice;
+    updateCompareSource(vis);
     elImgCompareRecon.src = vis.reconstruction;
 
     // 6. Update Inspector
@@ -263,7 +301,7 @@ document.addEventListener('DOMContentLoaded', () => {
     elInspectBurden.textContent = `${data.lesion_area_pct}% of tissue`;
 
     // 7. Update Full 5-Stage Scientific Pipeline
-    elImg5Input.src = vis.input_slice;
+    elImg5Input.src = procSrc;
     elImg5Recon.src = vis.reconstruction;
     elImg5Residual.src = vis.residual;
     elImg5KLSaliency.src = vis.kl_saliency;
@@ -271,6 +309,48 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // 8. Update AI Radiologist Narrative
     renderReasoning(data.reasoning_steps);
+  }
+
+  function updateStage1Image(vis, data) {
+    if (!vis) return;
+    const currentData = data || currentCase;
+    const ft = currentData?.file_telemetry;
+    if (stage1Mode === 'processed') {
+      elImgInput.src = vis.processed_input || vis.input_slice;
+      if (elStage1Title) elStage1Title.textContent = "Processed Model Input (x)";
+      if (elStage1Chip) {
+        elStage1Chip.textContent = "1×128×128 Processed";
+        elStage1Chip.className = "vcard-chip chip-cyan";
+      }
+      if (elStage1Desc) elStage1Desc.textContent = "Standardized 128×128 model input tensor normalized in [0.0, 1.0]";
+      if (elBtnToggleStage1Proc) elBtnToggleStage1Proc.classList.add('active');
+      if (elBtnToggleStage1Raw) elBtnToggleStage1Raw.classList.remove('active');
+    } else {
+      elImgInput.src = vis.raw_input || vis.input_slice;
+      if (elStage1Title) elStage1Title.textContent = "Original Given Scan";
+      if (elStage1Chip) {
+        elStage1Chip.textContent = ft ? `Raw (${ft.original_dimensions})` : "Original Scan";
+        elStage1Chip.className = "vcard-chip chip-neutral";
+      }
+      if (elStage1Desc) elStage1Desc.textContent = ft ? `Original patient scan (${ft.original_dimensions}, ${ft.original_mode})` : "Raw unscaled patient scan";
+      if (elBtnToggleStage1Raw) elBtnToggleStage1Raw.classList.add('active');
+      if (elBtnToggleStage1Proc) elBtnToggleStage1Proc.classList.remove('active');
+    }
+  }
+
+  function updateCompareSource(vis) {
+    if (!vis) return;
+    if (compareSourceMode === 'processed') {
+      elImgCompareInput.src = vis.processed_input || vis.input_slice;
+      if (elCompareBeforeTag) elCompareBeforeTag.textContent = "PROCESSED INPUT (x)";
+      if (elBtnCompareProc) elBtnCompareProc.classList.add('active');
+      if (elBtnCompareRaw) elBtnCompareRaw.classList.remove('active');
+    } else {
+      elImgCompareInput.src = vis.raw_input || vis.input_slice;
+      if (elCompareBeforeTag) elCompareBeforeTag.textContent = "ORIGINAL GIVEN SCAN";
+      if (elBtnCompareRaw) elBtnCompareRaw.classList.add('active');
+      if (elBtnCompareProc) elBtnCompareProc.classList.remove('active');
+    }
   }
 
   function updateSubtractionImage(vis) {
@@ -340,6 +420,34 @@ document.addEventListener('DOMContentLoaded', () => {
     elBtnToggleInferno.classList.remove('active');
     if (currentCase) updateSubtractionImage(currentCase.visualizations);
   });
+
+  // ==========================================
+  // 5b. Stage 1 View Mode Toggle (128x128 Processed vs Original)
+  // ==========================================
+  if (elBtnToggleStage1Proc && elBtnToggleStage1Raw) {
+    elBtnToggleStage1Proc.addEventListener('click', () => {
+      stage1Mode = 'processed';
+      if (currentCase) updateStage1Image(currentCase.visualizations);
+    });
+    elBtnToggleStage1Raw.addEventListener('click', () => {
+      stage1Mode = 'raw';
+      if (currentCase) updateStage1Image(currentCase.visualizations);
+    });
+  }
+
+  // ==========================================
+  // 5c. Compare Split Wipe Source Toggle
+  // ==========================================
+  if (elBtnCompareProc && elBtnCompareRaw) {
+    elBtnCompareProc.addEventListener('click', () => {
+      compareSourceMode = 'processed';
+      if (currentCase) updateCompareSource(currentCase.visualizations);
+    });
+    elBtnCompareRaw.addEventListener('click', () => {
+      compareSourceMode = 'raw';
+      if (currentCase) updateCompareSource(currentCase.visualizations);
+    });
+  }
 
   // ==========================================
   // 6. Interactive Threshold & Controls
@@ -501,5 +609,5 @@ document.addEventListener('DOMContentLoaded', () => {
   // ==========================================
   fetchStatus();
   fetchPresets();
-  runDiagnosis({ preset_id: 'gbm_parietal' });
+  runDiagnosis({ preset_id: 'real_gbm_highres' });
 });

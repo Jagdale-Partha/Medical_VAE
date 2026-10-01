@@ -108,6 +108,70 @@
           <span class="proc-status-pill" id="procStatusPill">MODEL COMPLIANT (1&times;128&times;128)</span>
         </div>
       </div>
+
+      <!-- Input Harmonization & Preprocessing Comparison (Raw Given vs Processed Model Input) -->
+      <div class="harmonization-preview-card" id="harmonizationCard">
+        <div class="harmonization-header">
+          <div class="harmonization-title-box">
+            <span class="harmonization-badge">INPUT HARMONIZATION &amp; PREPROCESSING</span>
+            <h3 class="harmonization-title">Given Image <em>vs</em> Processed Model Input</h3>
+          </div>
+          <div class="harmonization-specs-pills">
+            <span class="h-pill pill-neutral" id="hRawPill">Given: Detecting...</span>
+            <span class="h-arrow">&rarr;</span>
+            <span class="h-pill pill-accent" id="hProcessedPill">Model: 1&times;128&times;128 Float32</span>
+          </div>
+        </div>
+
+        <div class="harmonization-dual-grid">
+          <!-- Left: Original Image As Given -->
+          <div class="h-card h-card-raw">
+            <div class="h-card-top">
+              <span class="h-card-tag tag-raw">ORIGINAL GIVEN IMAGE</span>
+              <span class="h-dim-tag" id="rawDimTag">Native Dimensions</span>
+            </div>
+            <div class="h-img-wrapper">
+              <img id="imgRawInput" src="" alt="Original Given Input" class="h-display-img">
+            </div>
+            <div class="h-card-bottom">
+              <p class="h-caption" id="rawCaption">Patient scan as supplied before any downsampling or channel modifications.</p>
+              <div class="h-meta-row">
+                <span class="h-meta-item"><strong>Dimensions:</strong> <span id="rawMetaDim">--</span></span>
+                <span class="h-meta-item"><strong>Mode:</strong> <span id="rawMetaMode">--</span></span>
+                <span class="h-meta-item"><strong>Aspect:</strong> <span id="rawMetaAspect">--</span></span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Middle Transformation Conduit -->
+          <div class="h-conduit">
+            <div class="conduit-line"></div>
+            <div class="conduit-step-pill">1. Grayscale Blend</div>
+            <div class="conduit-step-pill">2. Letterbox (Zero Distort)</div>
+            <div class="conduit-step-pill">3. Scale (/255.0)</div>
+            <div class="conduit-arrow-badge">&rarr;</div>
+          </div>
+
+          <!-- Right: Processed 128x128 Model Input -->
+          <div class="h-card h-card-processed">
+            <div class="h-card-top">
+              <span class="h-card-tag tag-processed">PROCESSED MODEL INPUT (x)</span>
+              <span class="h-dim-tag highlight-cyan" id="processedDimTag">1&times;128&times;128 Float32</span>
+            </div>
+            <div class="h-img-wrapper">
+              <img id="imgProcessedInput" src="" alt="Processed Model Input Tensor" class="h-display-img">
+            </div>
+            <div class="h-card-bottom">
+              <p class="h-caption" id="processedCaption">Letterbox-padded single-channel tensor fed into the ceVAE+ encoder bottleneck.</p>
+              <div class="h-meta-row">
+                <span class="h-meta-item"><strong>Target Tensor:</strong> 1&times;1&times;128&times;128</span>
+                <span class="h-meta-item"><strong>Range:</strong> <span id="procMetaRange">[0.0, 1.0]</span></span>
+                <span class="h-meta-item"><strong>Padding:</strong> <span id="procMetaPad">Centered</span></span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
     </section>
 
     <!-- Interactive Tuning & Diagnostic Sensitivity Bar -->
@@ -115,9 +179,9 @@
       <div class="control-item">
         <label for="thresholdSlider">
           <span>Anomaly Sensitivity Threshold (&tau;):</span>
-          <span class="slider-badge" id="threshVal">0.35</span>
+          <span class="slider-badge" id="threshVal">0.28</span>
         </label>
-        <input type="range" id="thresholdSlider" min="0.10" max="0.85" step="0.01" value="0.35">
+        <input type="range" id="thresholdSlider" min="0.10" max="0.75" step="0.01" value="0.28">
       </div>
 
       <div class="control-item">
@@ -257,15 +321,21 @@
         <!-- Card 1: Input Image -->
         <div class="visual-card">
           <div class="vcard-header">
-            <span class="vcard-step">STAGE 1</span>
-            <span class="vcard-title">Input Image (x)</span>
+            <div>
+              <span class="vcard-step">STAGE 1</span>
+              <span class="vcard-title" id="stage1Title">Processed Model Input (x)</span>
+            </div>
+            <div class="vcard-micro-toggles">
+              <button class="btn-micro-toggle active" id="btnToggleStage1Proc" title="View 128x128 harmonized model input">128&times;128</button>
+              <button class="btn-micro-toggle" id="btnToggleStage1Raw" title="View original raw patient scan">Original</button>
+            </div>
           </div>
           <div class="vcard-img-box">
             <img id="imgInput" src="" alt="Input Image" class="vcard-img">
-            <span class="vcard-chip chip-cyan">1&times;128&times;128 Standardized</span>
+            <span class="vcard-chip chip-cyan" id="stage1Chip">1&times;128&times;128 Processed</span>
           </div>
           <div class="vcard-footer">
-            <p class="vcard-desc">Patient scan, standardized &amp; normalized to [0.0, 1.0]</p>
+            <p class="vcard-desc" id="stage1Desc">Standardized 128&times;128 model input tensor normalized in [0.0, 1.0]</p>
           </div>
         </div>
 
@@ -349,10 +419,15 @@
 
       <!-- Tab 1: Before / After Split Wipe Comparison -->
       <div class="panel-view-container" id="panelCompareView">
+        <div class="compare-controls-bar">
+          <span class="compare-mode-label">Comparison Source:</span>
+          <button class="btn-toggle active" id="btnCompareProc">Processed Input (x) vs Recon (x̂)</button>
+          <button class="btn-toggle" id="btnCompareRaw">Original Scan vs Recon (x̂)</button>
+        </div>
         <div class="comparison-container" id="compareContainer">
           <div class="compare-layer compare-before">
             <img id="imgCompareInput" src="" alt="Input" class="compare-img">
-            <span class="compare-tag tag-before">INPUT SCAN (x)</span>
+            <span class="compare-tag tag-before" id="compareBeforeTag">PROCESSED INPUT (x)</span>
           </div>
           <div class="compare-layer compare-after" id="compareAfterLayer">
             <img id="imgCompareRecon" src="" alt="Recon" class="compare-img">
@@ -364,7 +439,7 @@
             <div class="handle-arrow-right">&#9654;</div>
           </div>
         </div>
-        <p class="compare-instruction">Drag the handle horizontally to slide between the raw patient scan and the model's normative reconstruction (healthy brain manifold without tumors).</p>
+        <p class="compare-instruction">Drag the handle horizontally to slide between the patient scan and the model's normative reconstruction (healthy brain manifold without tumors).</p>
       </div>
 
       <!-- Tab 2: High-Res Inspector & Centroid Crosshair -->
