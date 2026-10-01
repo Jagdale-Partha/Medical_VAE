@@ -80,6 +80,7 @@ class CeVAETrainer:
             )
 
             loss = loss_dict["loss_total"]
+            self.optimizer.zero_grad()
             loss.backward()
 
             # Gradient clipping to stabilize dense bottleneck

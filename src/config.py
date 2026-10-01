@@ -28,12 +28,13 @@ class MaskingConfig:
 
 @dataclass
 class LossConfig:
-    bce_weight: float = 1.0
+    mse_weight: float = 1.0
     l1_weight: float = 0.5
-    ssim_weight: float = 0.2
-    edge_weight: float = 0.1
-    beta_kl: float = 0.002
-    clean_loss_weight: float = 0.5
+    bce_weight: float = 0.0
+    ssim_weight: float = 0.0
+    edge_weight: float = 0.0
+    beta_kl: float = 0.001
+    clean_loss_weight: float = 1.0
     inpaint_loss_weight: float = 0.5
     kl_warmup_epochs: int = 3  # Linear warmup to prevent posterior collapse
 

@@ -22,6 +22,8 @@ def parse_args():
     parser.add_argument("--epochs", type=int, default=default_cfg.train.epochs, help="Number of training epochs")
     parser.add_argument("--batch_size", type=int, default=default_cfg.train.batch_size, help="Batch size")
     parser.add_argument("--lr", type=float, default=default_cfg.train.learning_rate, help="Learning rate")
+    parser.add_argument("--mse_weight", type=float, default=default_cfg.loss.mse_weight, help="MSE reconstruction weight")
+    parser.add_argument("--l1_weight", type=float, default=default_cfg.loss.l1_weight, help="L1 reconstruction weight")
     parser.add_argument("--beta_kl", type=float, default=default_cfg.loss.beta_kl, help="KL loss weight beta")
     parser.add_argument("--device", type=str, default=default_cfg.train.device, help="Compute device (cuda/cpu)")
     parser.add_argument("--dataset", type=str, default="dataset_128", choices=["dataset_128", "ixi_t1", "axial_brain_mri", "real_brain_mri", "medmnist", "phantom"], help="Dataset source (dataset_128, ixi_t1, axial_brain_mri, real_brain_mri, medmnist, or phantom)")
@@ -39,6 +41,8 @@ def main():
     cfg.train.epochs = args.epochs
     cfg.train.batch_size = args.batch_size
     cfg.train.learning_rate = args.lr
+    cfg.loss.mse_weight = args.mse_weight
+    cfg.loss.l1_weight = args.l1_weight
     cfg.loss.beta_kl = args.beta_kl
     cfg.train.device = args.device
     if args.spatial_vae:
@@ -48,7 +52,7 @@ def main():
 
     print(f"=== Starting ceVAE+ Training ===")
     print(f"Device: {cfg.train.device} | Epochs: {cfg.train.epochs} | Batch Size: {cfg.train.batch_size} | Dataset: {args.dataset}")
-    print(f"Loss formulation: {cfg.loss.l1_weight} * L1 + {cfg.loss.ssim_weight} * (1 - SSIM) + {cfg.loss.edge_weight} * Edge + beta ({cfg.loss.beta_kl}) * KL")
+    print(f"Loss formulation: {cfg.loss.mse_weight} * MSE + {cfg.loss.l1_weight} * L1 + beta ({cfg.loss.beta_kl}) * KL")
 
     # Data loaders
     print(f"\n[1/4] Preparing normative healthy dataset splits ({args.dataset})...")
@@ -78,8 +82,9 @@ def main():
     # Loss engine & Perturbation module
     print("\n[3/4] Initializing loss engine and dynamic spatial eraser...")
     loss_fn = CompositeCeVAELoss(
-        bce_weight=getattr(cfg.loss, "bce_weight", 1.0),
+        mse_weight=cfg.loss.mse_weight,
         l1_weight=cfg.loss.l1_weight,
+        bce_weight=cfg.loss.bce_weight,
         ssim_weight=cfg.loss.ssim_weight,
         edge_weight=cfg.loss.edge_weight,
         beta_kl=cfg.loss.beta_kl,

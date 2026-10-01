@@ -88,7 +88,7 @@ class Bottleneck(nn.Module):
         super().__init__()
         self.latent_channels = latent_channels
         self.conv_mu = nn.Conv2d(in_channels, latent_channels, kernel_size=1)
-        
+
         self.conv_logvar = nn.Conv2d(in_channels, latent_channels, kernel_size=1)
 
     def reparameterize(self, mu: torch.Tensor, logvar: torch.Tensor) -> torch.Tensor:

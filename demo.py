@@ -46,13 +46,13 @@ def run_smoke_test():
         in_channels=1,
         image_size=128,
         base_channels=32,
-        latent_dim=128,
+        latent_dim=16,
         negative_slope=0.2,
     )
     outputs = model(x_clean=x, x_masked=x_masked)
     assert "recon_clean" in outputs and "recon_inpaint" in outputs
     assert outputs["recon_clean"].shape == (1, 1, 128, 128)
-    assert outputs["z"].shape == (1, 128)
+    assert outputs["z"].shape == (1, 16, 16, 16)
     print("  -> Model forward pass verified (Clean + Inpainting paths).")
 
     # 4. Loss Engine Check
