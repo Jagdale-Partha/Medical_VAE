@@ -47,10 +47,11 @@ DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 MODEL: Optional[EnhancedContextVAE] = None
 SCORER: Optional[DiagnosticAnomalyScorer] = None
 CONFIG = ExperimentConfig()
+CHECKPOINT_INFO: Dict[str, Any] = {}
 
 
 def get_or_load_model() -> EnhancedContextVAE:
-    global MODEL, SCORER
+    global MODEL, SCORER, CHECKPOINT_INFO
     if MODEL is None:
         MODEL = EnhancedContextVAE(
             in_channels=CONFIG.model.in_channels,
@@ -65,10 +66,20 @@ def get_or_load_model() -> EnhancedContextVAE:
             try:
                 state = torch.load(chk_path, map_location=DEVICE, weights_only=False)
                 MODEL.load_state_dict(state["model_state_dict"])
-                print(f"Loaded trained ceVAE+ checkpoint from {chk_path}")
+                val_loss_val = state.get("val_loss")
+                CHECKPOINT_INFO = {
+                    "loaded": True,
+                    "name": chk_path.name,
+                    "path": str(chk_path),
+                    "epoch": state.get("epoch"),
+                    "val_loss": round(float(val_loss_val), 4) if val_loss_val is not None else None,
+                }
+                print(f"Loaded trained ceVAE+ checkpoint from {chk_path} (Epoch: {CHECKPOINT_INFO['epoch']}, Val Loss: {CHECKPOINT_INFO['val_loss']})")
             except Exception as e:
+                CHECKPOINT_INFO = {"loaded": False, "error": str(e)}
                 print(f"Warning: Failed to load checkpoint ({e}). Running in inference mode.")
         else:
+            CHECKPOINT_INFO = {"loaded": False, "error": "No checkpoint file found"}
             print("Notice: No trained checkpoint found. Running with initialized weights.")
 
         MODEL.eval()
@@ -277,6 +288,10 @@ def get_status():
         "status": "online",
         "device": str(DEVICE),
         "checkpoint_loaded": chk_path.is_file(),
+        "checkpoint_name": CHECKPOINT_INFO.get("name", "best_cevae_model.pt" if chk_path.is_file() else None),
+        "checkpoint_epoch": CHECKPOINT_INFO.get("epoch"),
+        "checkpoint_val_loss": CHECKPOINT_INFO.get("val_loss"),
+        "loss_formulation": f"{CONFIG.loss.mse_weight}*MSE + {CONFIG.loss.l1_weight}*L1 + {CONFIG.loss.beta_kl}*KL",
         "total_parameters": param_count,
         "latent_dimension": CONFIG.model.latent_dim,
         "flattened_bottleneck_dim": CONFIG.model.flattened_dim,

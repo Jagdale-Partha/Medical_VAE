@@ -114,6 +114,22 @@ document.addEventListener('DOMContentLoaded', () => {
       const res = await fetch('/api/status');
       const data = await res.json();
       elDevice.textContent = `${data.device.toUpperCase()} (${(data.total_parameters / 1e6).toFixed(2)}M PARAMS)`;
+
+      const elBottleneck = document.getElementById('bottleneckVal');
+      if (elBottleneck && data.latent_dimension) {
+        elBottleneck.textContent = `SPATIAL (${data.latent_dimension}×16×16)`;
+      }
+
+      const elCheckpoint = document.getElementById('checkpointVal');
+      if (elCheckpoint) {
+        if (data.checkpoint_loaded && data.checkpoint_name) {
+          const valLoss = data.checkpoint_val_loss !== null ? ` (Val: ${data.checkpoint_val_loss})` : '';
+          elCheckpoint.textContent = `${data.checkpoint_name}${valLoss}`;
+          elCheckpoint.title = `Trained Checkpoint: ${data.checkpoint_name}\nEpoch: ${data.checkpoint_epoch}\nBest Val Loss: ${data.checkpoint_val_loss}\nLoss Formula: ${data.loss_formulation || 'N/A'}`;
+        } else {
+          elCheckpoint.textContent = 'UNTRAINED INITIALIZED';
+        }
+      }
     } catch (e) {
       console.warn('Status fetch error:', e);
       elDevice.textContent = 'CPU (ONLINE)';
