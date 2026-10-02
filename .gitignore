@@ -83,3 +83,6 @@ desktop.ini
 results/*
 !results/smoke_test_diagnostic.png
 !results/.gitkeep
+
+# Local Scratch / Test Scripts
+scratch/

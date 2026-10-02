@@ -7,6 +7,7 @@ Usage:
 import argparse
 from pathlib import Path
 import torch
+from torch.optim.lr_scheduler import CosineAnnealingLR
 
 from src.config import default_cfg, ExperimentConfig
 from src.data.dataset import get_uad_dataloaders
@@ -24,6 +25,8 @@ def parse_args():
     parser.add_argument("--lr", type=float, default=default_cfg.train.learning_rate, help="Learning rate")
     parser.add_argument("--mse_weight", type=float, default=default_cfg.loss.mse_weight, help="MSE reconstruction weight")
     parser.add_argument("--l1_weight", type=float, default=default_cfg.loss.l1_weight, help="L1 reconstruction weight")
+    parser.add_argument("--ssim_weight", type=float, default=default_cfg.loss.ssim_weight, help="SSIM loss weight")
+    parser.add_argument("--edge_weight", type=float, default=default_cfg.loss.edge_weight, help="Edge gradient loss weight")
     parser.add_argument("--beta_kl", type=float, default=default_cfg.loss.beta_kl, help="KL loss weight beta")
     parser.add_argument("--device", type=str, default=default_cfg.train.device, help="Compute device (cuda/cpu)")
     parser.add_argument("--dataset", type=str, default="dataset_128", choices=["dataset_128", "ixi_t1", "axial_brain_mri", "real_brain_mri", "medmnist", "phantom"], help="Dataset source (dataset_128, ixi_t1, axial_brain_mri, real_brain_mri, medmnist, or phantom)")
@@ -43,6 +46,8 @@ def main():
     cfg.train.learning_rate = args.lr
     cfg.loss.mse_weight = args.mse_weight
     cfg.loss.l1_weight = args.l1_weight
+    cfg.loss.ssim_weight = args.ssim_weight
+    cfg.loss.edge_weight = args.edge_weight
     cfg.loss.beta_kl = args.beta_kl
     cfg.train.device = args.device
     if args.spatial_vae:
@@ -52,7 +57,7 @@ def main():
 
     print(f"=== Starting ceVAE+ Training ===")
     print(f"Device: {cfg.train.device} | Epochs: {cfg.train.epochs} | Batch Size: {cfg.train.batch_size} | Dataset: {args.dataset}")
-    print(f"Loss formulation: {cfg.loss.mse_weight} * MSE + {cfg.loss.l1_weight} * L1 + beta ({cfg.loss.beta_kl}) * KL")
+    print(f"Loss formulation: {cfg.loss.mse_weight} * MSE + {cfg.loss.l1_weight} * L1 + {cfg.loss.ssim_weight} * SSIM + {cfg.loss.edge_weight} * Edge + beta ({cfg.loss.beta_kl}) * KL")
 
     # Data loaders
     print(f"\n[1/4] Preparing normative healthy dataset splits ({args.dataset})...")
@@ -104,6 +109,12 @@ def main():
         weight_decay=cfg.train.weight_decay,
     )
 
+    scheduler = CosineAnnealingLR(
+        optimizer,
+        T_max=cfg.train.epochs,
+        eta_min=1e-6,
+    )
+
     trainer = CeVAETrainer(
         model=model,
         loss_fn=loss_fn,
@@ -115,7 +126,43 @@ def main():
     # Training
     print("\n[4/4] Commencing model training...")
     chk_file = cfg.paths.checkpoints_dir / "best_cevae_model.pt"
-    history = trainer.fit(train_loader, val_loader, checkpoint_path=chk_file)
+    best_val_loss = float("inf")
+
+    for epoch in range(cfg.train.epochs):
+        current_lr = optimizer.param_groups[0]["lr"]
+        train_metrics = trainer.train_epoch(train_loader, epoch)
+        val_metrics = trainer.validate(val_loader)
+        scheduler.step()
+
+        trainer.history["train_loss"].append(train_metrics["loss"])
+        trainer.history["train_recon"].append(train_metrics["recon"])
+        trainer.history["train_kl"].append(train_metrics["kl"])
+        trainer.history["val_loss"].append(val_metrics["val_loss"])
+        trainer.history["val_recon"].append(val_metrics["val_recon"])
+        trainer.history["val_kl"].append(val_metrics["val_kl"])
+
+        print(
+            f"Epoch {epoch + 1:3d}/{cfg.train.epochs:3d} | "
+            f"Train Loss: {train_metrics['loss']:.4f} | "
+            f"Val Loss: {val_metrics['val_loss']:.4f} | "
+            f"LR: {current_lr:.6e} | "
+            f"Beta: {train_metrics['beta']:.5f}"
+        )
+
+        if val_metrics["val_loss"] < best_val_loss:
+            best_val_loss = val_metrics["val_loss"]
+            torch.save(
+                {
+                    "epoch": epoch,
+                    "model_state_dict": model.state_dict(),
+                    "optimizer_state_dict": optimizer.state_dict(),
+                    "val_loss": best_val_loss,
+                    "config": cfg,
+                },
+                chk_file,
+            )
+
+    history = trainer.history
 
     # Save training curves
     curve_file = cfg.paths.results_dir / "training_curves.png"
