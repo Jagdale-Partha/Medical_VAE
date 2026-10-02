@@ -52,7 +52,8 @@ checkpoints/*.pth
 !checkpoints/.gitkeep
 
 # Medical Imaging Data & Raw Volumes
-data/
+data/*
+!data/dataset_128.zip
 *.nii
 *.nii.gz
 *.dcm
