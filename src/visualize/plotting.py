@@ -135,7 +135,7 @@ def plot_training_curves(
     axes[0].legend()
 
     # Reconstruction Loss
-    axes[1].plot(epochs, history["train_recon"], label="Train Recon (0.8 L1 + 0.2 SSIM)", color="#2ca02c", lw=2)
+    axes[1].plot(epochs, history["train_recon"], label="Train Recon", color="#2ca02c", lw=2)
     axes[1].plot(epochs, history["val_recon"], label="Val Recon", color="#d62728", lw=2, linestyle="--")
     axes[1].set_title("Reconstruction Loss", fontweight="bold")
     axes[1].set_xlabel("Epoch")

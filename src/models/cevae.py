@@ -1,7 +1,7 @@
 """
 Spatial ceVAE (Spatial Context-Encoding Variational Autoencoder) Architecture.
 Solves the fundamental blurriness of 1D bottleneck VAEs in Medical Brain MRI:
-- Preserves 2D topological feature grids in latent space (16 x 16 x 16) instead of collapsing into a 1D vector.
+- Preserves 2D topological feature grids in latent space (8 x 16 x 16) instead of collapsing into a 1D vector.
 - Eliminates the 2.1-million parameter dense linear bottleneck that acted as an aggressive low-pass blur filter.
 - Retains 64x spatial area compression (8x downsampling) to prevent pathological lesion leakage.
 - Incorporates residual refinement blocks to preserve fine sulcal, gyral, and ventricular boundaries.
@@ -84,7 +84,7 @@ class Bottleneck(nn.Module):
     Preserves 2D spatial locality and topological neighborhoods.
     """
 
-    def __init__(self, in_channels: int = 128, latent_channels: int = 16):
+    def __init__(self, in_channels: int = 128, latent_channels: int = 8):
         super().__init__()
         self.latent_channels = latent_channels
         self.conv_mu = nn.Conv2d(in_channels, latent_channels, kernel_size=1)
@@ -108,12 +108,12 @@ class Bottleneck(nn.Module):
 class Decoder(nn.Module):
     """
     Hierarchical 3-stage spatial upsampling decoder with residual refinement.
-    Maps latent z (B, 16, 16, 16) -> 1 x 128 x 128 sharp reconstruction.
+    Maps latent z (B, 8, 16, 16) -> 1 x 128 x 128 sharp reconstruction.
     """
 
     def __init__(
         self,
-        latent_channels: int = 16,
+        latent_channels: int = 8,
         base_channels: int = 32,
         out_channels: int = 1,
         negative_slope: float = 0.2,
@@ -133,6 +133,7 @@ class Decoder(nn.Module):
             nn.Conv2d(c3, c3, kernel_size=3, padding=1),
             nn.InstanceNorm2d(c3, affine=True),
             nn.LeakyReLU(negative_slope=negative_slope, inplace=True),
+            ResBlock2d(c3, negative_slope=negative_slope),
         )
         # Stage 2: 32 -> 64
         self.up2 = nn.Sequential(
@@ -140,6 +141,7 @@ class Decoder(nn.Module):
             nn.Conv2d(c3, c2, kernel_size=3, padding=1),
             nn.InstanceNorm2d(c2, affine=True),
             nn.LeakyReLU(negative_slope=negative_slope, inplace=True),
+            ResBlock2d(c2, negative_slope=negative_slope),
         )
         # Stage 3: 64 -> 128 with edge refinement
         self.up3 = nn.Sequential(
@@ -173,8 +175,8 @@ class EnhancedContextVAE(nn.Module):
     Spatial Context-Encoding Variational Autoencoder (Spatial ceVAE).
     Integrates:
     - Spatial Encoder (128x128 -> 16x16x128)
-    - Spatial Bottleneck (16x16x128 -> 16x16x16 spatial latents)
-    - Spatial Decoder with Residual Edge Refinement (16x16x16 -> 128x128x1)
+    - Spatial Bottleneck (16x16x128 -> 8x16x16 spatial latents)
+    - Spatial Decoder with Residual Edge Refinement (8x16x16 -> 128x128x1)
     - Dual-Pass Training (Clean Pass + Context-Inpainting Erased Pass)
     """
 
@@ -183,7 +185,7 @@ class EnhancedContextVAE(nn.Module):
         in_channels: int = 1,
         image_size: int = 128,
         base_channels: int = 32,
-        latent_dim: int = 16,  # Spatial latent channels (16x16x16 = 4096 spatial latents)
+        latent_dim: int = 8,  # Spatial latent channels (8x16x16 = 2048 spatial latents)
         negative_slope: float = 0.2,
     ):
         super().__init__()

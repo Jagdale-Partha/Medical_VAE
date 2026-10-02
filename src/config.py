@@ -13,8 +13,8 @@ class ModelConfig:
     in_channels: int = 1
     image_size: int = 128
     base_channels: int = 32  # 32 -> 64 -> 128
-    latent_dim: int = 16  # Spatial latent channels (16 x 16 x 16)
-    flattened_dim: int = 16 * 16 * 16  # 4096
+    latent_dim: int = 8  # Spatial latent channels (8 x 16 x 16)
+    flattened_dim: int = 8 * 16 * 16  # 2048
     leaky_relu_slope: float = 0.2
 
 
@@ -23,17 +23,17 @@ class MaskingConfig:
     min_box_size: int = 16
     max_box_size: int = 32
     mask_value: float = 0.0  # Zero-out erased spatial context
-    p_apply: float = 1.0  # Probability of applying spatial masking during training
+    p_apply: float = 0.8  # Probability of applying spatial masking during training
 
 
 @dataclass
 class LossConfig:
     mse_weight: float = 1.0
-    l1_weight: float = 0.5
+    l1_weight: float = 1.0
     bce_weight: float = 0.0
-    ssim_weight: float = 0.0
-    edge_weight: float = 0.0
-    beta_kl: float = 0.001
+    ssim_weight: float = 0.3
+    edge_weight: float = 0.1
+    beta_kl: float = 0.005
     clean_loss_weight: float = 1.0
     inpaint_loss_weight: float = 0.5
     kl_warmup_epochs: int = 3  # Linear warmup to prevent posterior collapse
@@ -49,7 +49,7 @@ class AnomalyScorerConfig:
 @dataclass
 class TrainingConfig:
     batch_size: int = 16
-    epochs: int = 40
+    epochs: int = 100
     learning_rate: float = 1e-4
     weight_decay: float = 1e-5
     grad_clip_norm: float = 5.0

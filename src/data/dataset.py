@@ -229,6 +229,8 @@ def create_uad_data_splits(
     val_ds = BrainMRISliceDataset(val_imgs, val_msks, val_lbls)
     test_ds = BrainMRISliceDataset(test_imgs, test_msks, test_lbls)
 
+    return train_ds, val_ds, test_ds
+
 # Alias for semantic clarity
 MedMNISTUADDataset = BrainMRISliceDataset
 
