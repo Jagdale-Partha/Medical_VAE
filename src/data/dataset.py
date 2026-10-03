@@ -484,6 +484,14 @@ def load_ixi_t1_uad_splits(
     root_path = Path(data_dir) if data_dir else Path("data/IXI-T1")
     rng = np.random.default_rng(seed)
 
+    # Auto-extract if data/IXI-T1/train not found but IXI-T1.zip is present
+    if not (root_path / "train").is_dir() and Path("data/IXI-T1.zip").is_file():
+        import zipfile
+        print("📦 Auto-extracting original IXI-T1 dataset from data/IXI-T1.zip (5,000 real slices in train)...")
+        with zipfile.ZipFile("data/IXI-T1.zip", "r") as zf:
+            zf.extractall("data")
+        print("✓ Successfully extracted original IXI-T1 dataset!")
+
     # 1. Load Train
     train_npy = root_path / "train_slices.npy"
     if train_npy.is_file():
@@ -682,7 +690,7 @@ def load_dataset_128_uad_splits(
 
 
 def get_uad_dataloaders(
-    dataset_source: str = "dataset_128",
+    dataset_source: str = "ixi_t1",
     dataset_name: str = "OrganAMNIST",
     batch_size: int = 16,
     image_size: int = 128,
@@ -696,8 +704,8 @@ def get_uad_dataloaders(
     """
     Factory function returning (train_loader, val_loader, test_loader).
     Supports:
-    - 'dataset_128', '128': Ultra-fast standardized 128x128 Brain MRI dataset (IXI T1 + clinical tumors).
-    - 'ixi_t1', 'ixi', 'ixi-t1': Gold standard normative healthy IXI T1 cranial MRI slices.
+    - 'ixi_t1', 'ixi', 'ixi-t1': Gold standard normative healthy IXI T1 cranial MRI slices (data/IXI-T1/train).
+    - 'dataset_128', '128': Fast standardized 128x128 Brain MRI dataset (falls back to IXI-T1 if npy not prebuilt).
     - 'axial_brain_mri' or 'axial': Clean single-modality Axial brain MRI slices with balanced test cohort.
     - 'real_brain_mri': Real clinical patient brain MRI scans with letterbox padding.
     - 'medmnist': Official MedMNIST v2/v3 datasets.
@@ -705,12 +713,23 @@ def get_uad_dataloaders(
     """
     source_lower = dataset_source.lower()
     if source_lower in ("dataset_128", "128", "ixi_128"):
-        train_ds, val_ds, test_ds = load_dataset_128_uad_splits(
-            max_train=max_train_samples,
-            max_val=max_val_samples,
-            max_patho_test=max_patho_samples or 60,
-            seed=seed,
-        )
+        if Path("data/dataset_128/train_128.npy").is_file():
+            train_ds, val_ds, test_ds = load_dataset_128_uad_splits(
+                max_train=max_train_samples,
+                max_val=max_val_samples,
+                max_patho_test=max_patho_samples or 60,
+                seed=seed,
+            )
+        else:
+            print("Notice: data/dataset_128 not found. Using original normative dataset from data/IXI-T1/train.")
+            train_ds, val_ds, test_ds = load_ixi_t1_uad_splits(
+                data_dir="data/IXI-T1",
+                image_size=image_size,
+                max_train=max_train_samples or 5000,
+                max_val=max_val_samples or 800,
+                max_patho_test=max_patho_samples or 60,
+                seed=seed,
+            )
     elif source_lower in ("ixi_t1", "ixi", "ixi-t1", "ixit1"):
         ixi_dir = Path("data/IXI-T1")
         if (ixi_dir / "train").is_dir() or (ixi_dir / "train_slices.npy").is_file():

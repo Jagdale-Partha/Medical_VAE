@@ -103,7 +103,13 @@ def run_showcase(
     output_dir: str = "results",
 ):
     chk = Path(checkpoint_path)
-    device = torch.device(device if torch.cuda.is_available() else "cpu")
+    if device == "cuda" and not torch.cuda.is_available():
+        device_obj = torch.device("cpu")
+    elif device == "cuda":
+        device_obj = torch.device("cuda")
+    else:
+        device_obj = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = device_obj
     out_dir = Path(output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -141,7 +147,7 @@ def run_showcase(
     # Load test data
     print("Loading test cohort (normative healthy + clinical brain tumors)...", flush=True)
     _, _, test_loader = get_uad_dataloaders(
-        dataset_source="dataset_128",
+        dataset_source="ixi_t1",
         batch_size=16,
         image_size=cfg.model.image_size,
         num_workers=0,

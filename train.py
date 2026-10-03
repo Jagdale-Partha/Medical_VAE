@@ -29,7 +29,7 @@ def parse_args():
     parser.add_argument("--edge_weight", type=float, default=default_cfg.loss.edge_weight, help="Edge gradient loss weight")
     parser.add_argument("--beta_kl", type=float, default=default_cfg.loss.beta_kl, help="KL loss weight beta")
     parser.add_argument("--device", type=str, default=default_cfg.train.device, help="Compute device (cuda/cpu)")
-    parser.add_argument("--dataset", type=str, default="dataset_128", choices=["dataset_128", "ixi_t1", "axial_brain_mri", "real_brain_mri", "medmnist", "phantom"], help="Dataset source (dataset_128, ixi_t1, axial_brain_mri, real_brain_mri, medmnist, or phantom)")
+    parser.add_argument("--dataset", type=str, default="ixi_t1", choices=["ixi_t1", "dataset_128", "axial_brain_mri", "real_brain_mri", "medmnist", "phantom"], help="Dataset source (ixi_t1 [default], dataset_128, axial_brain_mri, real_brain_mri, medmnist, or phantom)")
     parser.add_argument("--max_train_samples", type=int, default=None, help="Maximum number of training slices (default: all)")
     parser.add_argument("--max_val_samples", type=int, default=None, help="Maximum number of validation slices (default: all)")
     parser.add_argument("--spatial_vae", action="store_true", help="Train pure Spatial VAE (single-pass, 2x faster, razor-sharp edges)")
