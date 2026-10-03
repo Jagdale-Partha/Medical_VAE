@@ -712,9 +712,17 @@ def get_uad_dataloaders(
             seed=seed,
         )
     elif source_lower in ("ixi_t1", "ixi", "ixi-t1", "ixit1"):
-        # Auto-prefer standardized dataset_128 if available
-        d128_path = Path("data/dataset_128/train_128.npy")
-        if d128_path.is_file():
+        ixi_dir = Path("data/IXI-T1")
+        if (ixi_dir / "train").is_dir() or (ixi_dir / "train_slices.npy").is_file():
+            train_ds, val_ds, test_ds = load_ixi_t1_uad_splits(
+                data_dir=str(ixi_dir),
+                image_size=image_size,
+                max_train=max_train_samples or 5000,
+                max_val=max_val_samples or 800,
+                max_patho_test=max_patho_samples or 60,
+                seed=seed,
+            )
+        elif Path("data/dataset_128/train_128.npy").is_file():
             train_ds, val_ds, test_ds = load_dataset_128_uad_splits(
                 max_train=max_train_samples,
                 max_val=max_val_samples,
@@ -724,10 +732,11 @@ def get_uad_dataloaders(
         else:
             try:
                 train_ds, val_ds, test_ds = load_ixi_t1_uad_splits(
+                    data_dir=str(ixi_dir),
                     image_size=image_size,
                     max_train=max_train_samples or 5000,
                     max_val=max_val_samples or 800,
-                    max_patho_test=max_patho_samples or 30,
+                    max_patho_test=max_patho_samples or 60,
                     seed=seed,
                 )
             except Exception as e:

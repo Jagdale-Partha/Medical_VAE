@@ -54,6 +54,7 @@ checkpoints/*.pth
 # Medical Imaging Data & Raw Volumes
 data/*
 !data/dataset_128.zip
+!data/IXI-T1.zip
 *.nii
 *.nii.gz
 *.dcm
